@@ -36,7 +36,7 @@ ALL_POPS    = ["afr", "eur", "sas", "mid", "eas", "amr"]
 
 # paths (overridable via CLI)
 CFG = dict(
-    mvn_dir=Path("mvn"), h5_path=Path("mvn/mutation_rate_map_perpop.h5"),
+    mvn_dir=Path("mvn"), h5_path=Path("mvn/mutation_rate_map_perpop_all.h5"),
     hardmask=Path("hardmask.hg38.v4.over99.bed"),
     demog_dir=Path("demographies"), sim_dir=Path("/scratch.global/soisa001/sims"),
 )
@@ -233,10 +233,10 @@ def parse_chroms(s):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--workers", type=int, default=16)
-    ap.add_argument("--n-sims", type=int, default=10)
+    ap.add_argument("--n-sims", type=int, default=1000)
     ap.add_argument("--n-draws", type=int, default=1000, help="demographies to ensure per pop")
     ap.add_argument("--pops", type=str, default=",".join(ALL_POPS))
-    ap.add_argument("--chroms", type=str, default="1-5")
+    ap.add_argument("--chroms", type=str, default="1-22")
     ap.add_argument("--mvn-dir", type=Path); ap.add_argument("--h5", type=Path, dest="h5_path")
     ap.add_argument("--hardmask", type=Path); ap.add_argument("--demog-dir", type=Path)
     ap.add_argument("--sim-dir", type=Path)
