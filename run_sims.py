@@ -116,6 +116,11 @@ def calibrate_chrom(demography, pop, n_samples, seq_len, theta_target, mask, see
     if under:
         edges = np.minimum(np.arange(n_win + 1) * WINDOW_SIZE, seq_len).astype(float)
         needed = dict(under); cur = MU_RETRY
+        # Each retry iteration re-simulates the SAME ts over the same under-target
+        # windows; with a discrete genome the new sites often reuse integer positions
+        # already grafted in a prior iteration. Track them so we never add two sites
+        # at the same position (which fails tskit's TSK_ERR_DUPLICATE_SITE_POSITION).
+        added_pos = set()
         for it in range(max_retry_iters):
             if not needed:
                 break
@@ -129,15 +134,23 @@ def calibrate_chrom(demography, pop, n_samples, seq_len, theta_target, mask, see
             k2 = ~masked(p2, mask); w2 = np.minimum(p2 // WINDOW_SIZE, n_win - 1)
             still = {}
             for w, need in needed.items():
-                grp = np.nonzero(k2 & (w2 == w))[0][:need]
-                for s in grp:
+                cand_idx = np.nonzero(k2 & (w2 == w))[0]
+                added = 0
+                for s in cand_idx:
+                    if added >= need:
+                        break
                     st = mts2.site(int(s))
+                    posn = int(st.position)
+                    if posn in added_pos:
+                        continue
+                    added_pos.add(posn)
                     si = tb.sites.add_row(position=st.position, ancestral_state=st.ancestral_state)
                     for m in st.mutations:
                         tb.mutations.add_row(site=si, node=m.node, derived_state=m.derived_state,
                                              parent=-1, time=m.time)
-                if len(grp) < need:
-                    still[w] = need - len(grp)
+                    added += 1
+                if added < need:
+                    still[w] = need - added
             needed = still; cur *= 2.0
     tb.sort(); tb.build_index(); tb.compute_mutation_parents()
     return tb.tree_sequence(), (needed if under else {})
