@@ -14,11 +14,15 @@ for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
            "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
     os.environ.setdefault(_v, "1")
 
-import argparse, sys, time, traceback, functools
+import argparse, sys, time, traceback, functools, threading
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import numpy as np
 import h5py, demes, msprime, tszip
+try:
+    import resource                       # Unix-only; used for per-worker peak RSS
+except ImportError:                       # pragma: no cover  (non-Unix dev box)
+    resource = None
 
 # ─────────────────────────────── CONSTANTS ───────────────────────────────
 WINDOW_SIZE = 20_000
@@ -184,6 +188,42 @@ def tsz_is_complete(path, theta_target):
             return False
     return True
 
+# ─────────────────────────── lightweight profiling ───────────────────────────
+def _rss_mb():
+    """Current resident set size of this process in MB (Linux /proc, resource fallback)."""
+    try:
+        with open("/proc/self/statm") as fh:
+            resident_pages = int(fh.read().split()[1])
+        return resident_pages * os.sysconf("SC_PAGE_SIZE") / 1e6
+    except Exception:
+        if resource is not None:
+            return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0   # KB->MB (Linux)
+        return 0.0
+
+def _worker_peak_mb():
+    """High-water RSS for THIS worker over its whole lifetime, in MB (per-thread max)."""
+    if resource is not None:
+        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0       # KB->MB (Linux)
+    return _rss_mb()
+
+class _PeakRSS:
+    """Context manager estimating the peak RSS reached during one unit. msprime releases
+    the GIL in its C core, so a daemon sampler thread keeps polling while a sim is in
+    flight; sampling is one cheap /proc read per interval. Approximate for sub-interval
+    units, but those are the small/cheap ones we don't worry about."""
+    def __init__(self, interval=0.2):
+        self.interval = interval; self.peak = 0.0
+        self._stop = threading.Event()
+        self._t = threading.Thread(target=self._run, daemon=True)
+    def _run(self):
+        while not self._stop.is_set():
+            self.peak = max(self.peak, _rss_mb())
+            self._stop.wait(self.interval)
+    def __enter__(self):
+        self.peak = _rss_mb(); self._t.start(); return self
+    def __exit__(self, *exc):
+        self._stop.set(); self._t.join(timeout=1.0)
+
 # ─────────────────────────────── worker ───────────────────────────────
 def simulate_unit(unit):
     """One (pop, sim_idx, chrom) job. Returns a status dict. Top-level for picklability.
@@ -208,15 +248,18 @@ def simulate_unit(unit):
         demo_path = CFG["demog_dir"] / pop / f"demo_{sim_idx:05d}.yaml"
         if not demo_path.exists():
             return dict(unit=unit, status="no_demog", msg=str(demo_path))
-        demography = msprime.Demography.from_demes(demes.load(str(demo_path)))
         n_samples = POP_SAMPLES[pop]
         seed = BASE_SEED + 1_000_000 * (ALL_POPS.index(pop) + 1) + 1000 * sim_idx + chrom
-        cal, short = calibrate_chrom(demography, pop, n_samples, seq_len, theta, load_mask(chrom), seed)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        tmp = out.with_suffix(".tsz.tmp")
-        tszip.compress(cal, str(tmp)); os.replace(tmp, out)   # atomic
+        t_unit = time.time()
+        with _PeakRSS() as ps:
+            demography = msprime.Demography.from_demes(demes.load(str(demo_path)))
+            cal, short = calibrate_chrom(demography, pop, n_samples, seq_len, theta, load_mask(chrom), seed)
+            out.parent.mkdir(parents=True, exist_ok=True)
+            tmp = out.with_suffix(".tsz.tmp")
+            tszip.compress(cal, str(tmp)); os.replace(tmp, out)   # atomic
         return dict(unit=unit, status="ok", n_sites=int(cal.num_sites),
-                    target=int(theta.sum()), under=len(short), n=n_samples, rebuilt=rebuilt)
+                    target=int(theta.sum()), under=len(short), n=n_samples, rebuilt=rebuilt,
+                    secs=time.time() - t_unit, peak_mb=ps.peak, worker_rss_mb=_worker_peak_mb())
     except Exception:
         return dict(unit=unit, status="error", msg=traceback.format_exc().splitlines()[-1])
 
@@ -273,18 +316,26 @@ def main():
     # 3) parallel run
     t0 = time.time(); done = err = rebuilt_n = 0
     tally = {}
+    max_worker_rss = 0.0          # peak RSS any single worker reached -> max memory per thread
+    prof = {}                     # chrom -> [n, sum_secs, max_secs, max_peak_mb]
     with ProcessPoolExecutor(max_workers=a.workers) as ex:
         futs = {ex.submit(simulate_unit, u): u for u in units}
         for fut in as_completed(futs):
             r = fut.result(); done += 1
             tally[r["status"]] = tally.get(r["status"], 0) + 1
+            if "worker_rss_mb" in r:
+                max_worker_rss = max(max_worker_rss, r["worker_rss_mb"])
             if r["status"] == "ok":
                 p, i, c = r["unit"]
                 tag = " [rebuilt corrupt]" if r.get("rebuilt") else ""
                 if r.get("rebuilt"):
                     rebuilt_n += 1
+                secs = r.get("secs", 0.0); peak = r.get("peak_mb", 0.0)
+                pr = prof.setdefault(c, [0, 0.0, 0.0, 0.0])
+                pr[0] += 1; pr[1] += secs; pr[2] = max(pr[2], secs); pr[3] = max(pr[3], peak)
                 print(f"  [{done}/{n}] {p} sim{i} chr{c}: {r['n_sites']:,} sites "
-                      f"(target {r['target']:,})" + (f" retry={r['under']}" if r['under'] else "") + tag)
+                      f"(target {r['target']:,})" + (f" retry={r['under']}" if r['under'] else "")
+                      + f"  {secs:.1f}s peak={peak:,.0f}MB" + tag)
             elif r["status"] == "error":
                 err += 1; print(f"  [{done}/{n}] ERROR {r['unit']}: {r['msg']}")
             elif r["status"] in ("no_demog", "zero_theta"):
@@ -292,6 +343,18 @@ def main():
     dt = time.time() - t0
     print(f"\nDONE in {dt:.0f}s  ({dt/max(n,1):.1f}s/unit wall)  tally={tally}"
           + (f"  rebuilt_corrupt={rebuilt_n}" if rebuilt_n else ""))
+    if prof:
+        print(f"  peak RSS per worker (max over {a.workers} workers): {max_worker_rss:,.0f} MB")
+        print("  per-chrom profile (computed units only):")
+        print("    chr      n   mean_s    max_s   max_peak_MB")
+        worst_peak = 0.0
+        for c in sorted(prof):
+            cnt, ssum, smax, pmax = prof[c]
+            worst_peak = max(worst_peak, pmax)
+            print(f"    {c:>3}  {cnt:>5}  {ssum/cnt:>7.1f}  {smax:>7.1f}   {pmax:>11,.0f}")
+        if worst_peak > 0:
+            print(f"  mem guidance: --workers <= RAM_GB*1024 / {worst_peak:,.0f} "
+                  f"(largest single-unit peak); peak/worker observed {max_worker_rss:,.0f} MB")
     if err:
         sys.exit(1)
 
