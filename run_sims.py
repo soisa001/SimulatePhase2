@@ -155,23 +155,59 @@ def calibrate_chrom(demography, pop, n_samples, seq_len, theta_target, mask, see
     tb.sort(); tb.build_index(); tb.compute_mutation_parents()
     return tb.tree_sequence(), (needed if under else {})
 
+def tsz_is_complete(path, theta_target):
+    """Validate a finished output before trusting it for idempotent skip.
+
+    A clean SIGKILL leaves only the .tsz.tmp (the .tsz rename is atomic), but a node
+    crash / power loss on networked scratch can drop un-flushed blocks after the rename
+    — and any .tsz from an older non-atomic run has the same risk — leaving a .tsz that
+    exists but is truncated/corrupt. Mere existence is therefore not enough.
+
+    Two checks: (1) it must decompress without error, and (2) the first 5 and last 5
+    windows that *should* carry a mutation (theta_target > 0) must each contain >=1 site.
+    A truncated table fails the load; a short/partial one fails the tail-window check.
+    """
+    try:
+        ts = tszip.decompress(str(path))
+    except Exception:
+        return False
+    nz = np.nonzero(np.asarray(theta_target) > 0)[0]
+    if nz.size == 0:
+        return True                       # nothing should be present; loading cleanly is enough
+    check = np.unique(np.concatenate([nz[:5], nz[-5:]]))
+    pos = ts.tables.sites.position        # tskit guarantees sites sorted by position
+    for w in check:
+        lo = int(w) * WINDOW_SIZE
+        i = np.searchsorted(pos, lo, side="left")
+        j = np.searchsorted(pos, lo + WINDOW_SIZE, side="left")
+        if j - i == 0:                    # a window that should have a mutation has none
+            return False
+    return True
+
 # ─────────────────────────────── worker ───────────────────────────────
 def simulate_unit(unit):
-    """One (pop, sim_idx, chrom) job. Returns a status dict. Top-level for picklability."""
+    """One (pop, sim_idx, chrom) job. Returns a status dict. Top-level for picklability.
+
+    Idempotent: an existing output is reused only if it passes tsz_is_complete(); a
+    partial/corrupt .tsz is treated as missing and rebuilt (overwritten atomically)."""
     pop, sim_idx, chrom = unit
     out = CFG["sim_dir"] / pop / f"sim_{sim_idx:05d}" / f"chr{chrom}.tsz"
-    if out.exists():
-        return dict(unit=unit, status="skip")
     try:
-        demo_path = CFG["demog_dir"] / pop / f"demo_{sim_idx:05d}.yaml"
-        if not demo_path.exists():
-            return dict(unit=unit, status="no_demog", msg=str(demo_path))
         with h5py.File(CFG["h5_path"], "r") as f:
             g = f[f"chr{chrom}"]
             theta = np.asarray(g[pop]["theta"][...]).astype(np.int64)
             seq_len = int(g["window_ends"][-1])      # source of truth = the theta map
         if int(theta.sum()) == 0:
             return dict(unit=unit, status="zero_theta")
+        if out.exists():
+            if tsz_is_complete(out, theta):
+                return dict(unit=unit, status="skip")
+            rebuilt = True                           # exists but partial/corrupt -> rebuild
+        else:
+            rebuilt = False
+        demo_path = CFG["demog_dir"] / pop / f"demo_{sim_idx:05d}.yaml"
+        if not demo_path.exists():
+            return dict(unit=unit, status="no_demog", msg=str(demo_path))
         demography = msprime.Demography.from_demes(demes.load(str(demo_path)))
         n_samples = POP_SAMPLES[pop]
         seed = BASE_SEED + 1_000_000 * (ALL_POPS.index(pop) + 1) + 1000 * sim_idx + chrom
@@ -180,7 +216,7 @@ def simulate_unit(unit):
         tmp = out.with_suffix(".tsz.tmp")
         tszip.compress(cal, str(tmp)); os.replace(tmp, out)   # atomic
         return dict(unit=unit, status="ok", n_sites=int(cal.num_sites),
-                    target=int(theta.sum()), under=len(short), n=n_samples)
+                    target=int(theta.sum()), under=len(short), n=n_samples, rebuilt=rebuilt)
     except Exception:
         return dict(unit=unit, status="error", msg=traceback.format_exc().splitlines()[-1])
 
@@ -226,30 +262,36 @@ def main():
         w = ensure_demographies(pop, max(a.n_draws, a.n_sims))
         print(f"  [demog] {pop}: ensured {max(a.n_draws,a.n_sims)} ({w} newly written)")
 
-    # 2) build work units, drop already-done up front
+    # 2) build work units. Existing outputs are validated for completeness inside the
+    #    worker (mere existence is no longer trusted), so submit everything; complete
+    #    files return immediately as "skip" and partial/corrupt ones are rebuilt.
     units = [(p, i, c) for p in pops for i in range(a.n_sims) for c in chroms]
-    pending = [u for u in units
-               if not (CFG["sim_dir"] / u[0] / f"sim_{u[1]:05d}" / f"chr{u[2]}.tsz").exists()]
-    print(f"  {len(units)} total units, {len(units)-len(pending)} already done, {len(pending)} to run")
+    n = len(units)
+    print(f"  {n} total units (existing .tsz are validated for completeness; "
+          f"partial/corrupt are rebuilt)")
 
     # 3) parallel run
-    t0 = time.time(); done = err = 0
+    t0 = time.time(); done = err = rebuilt_n = 0
     tally = {}
     with ProcessPoolExecutor(max_workers=a.workers) as ex:
-        futs = {ex.submit(simulate_unit, u): u for u in pending}
+        futs = {ex.submit(simulate_unit, u): u for u in units}
         for fut in as_completed(futs):
             r = fut.result(); done += 1
             tally[r["status"]] = tally.get(r["status"], 0) + 1
             if r["status"] == "ok":
                 p, i, c = r["unit"]
-                print(f"  [{done}/{len(pending)}] {p} sim{i} chr{c}: {r['n_sites']:,} sites "
-                      f"(target {r['target']:,})" + (f" retry={r['under']}" if r['under'] else ""))
+                tag = " [rebuilt corrupt]" if r.get("rebuilt") else ""
+                if r.get("rebuilt"):
+                    rebuilt_n += 1
+                print(f"  [{done}/{n}] {p} sim{i} chr{c}: {r['n_sites']:,} sites "
+                      f"(target {r['target']:,})" + (f" retry={r['under']}" if r['under'] else "") + tag)
             elif r["status"] == "error":
-                err += 1; print(f"  [{done}/{len(pending)}] ERROR {r['unit']}: {r['msg']}")
+                err += 1; print(f"  [{done}/{n}] ERROR {r['unit']}: {r['msg']}")
             elif r["status"] in ("no_demog", "zero_theta"):
-                print(f"  [{done}/{len(pending)}] SKIP {r['unit']} ({r['status']} {r.get('msg','')})")
+                print(f"  [{done}/{n}] SKIP {r['unit']} ({r['status']} {r.get('msg','')})")
     dt = time.time() - t0
-    print(f"\nDONE in {dt:.0f}s  ({dt/max(len(pending),1):.1f}s/unit wall)  tally={tally}")
+    print(f"\nDONE in {dt:.0f}s  ({dt/max(n,1):.1f}s/unit wall)  tally={tally}"
+          + (f"  rebuilt_corrupt={rebuilt_n}" if rebuilt_n else ""))
     if err:
         sys.exit(1)
 
