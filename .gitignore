@@ -1,0 +1,7 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Simulation outputs / data artifacts
+*.tsz
+*.tsz.tmp
