@@ -37,6 +37,7 @@ MU_RETRY    = 1e-7        # base retry rate for under-target windows
 GEN_TIME    = 29
 TIME_GRID   = np.geomspace(100.0, 40_000.0, 1000)
 ALL_POPS    = ["afr", "eur", "sas", "mid", "eas", "amr"]
+HB_INTERVAL = 10.0       # seconds between driver heartbeat/progress lines
 
 # paths (overridable via CLI)
 CFG = dict(
@@ -311,18 +312,23 @@ def main():
     units = [(p, i, c) for p in pops for i in range(a.n_sims) for c in chroms]
     n = len(units)
     print(f"  {n} total units (existing .tsz are validated for completeness; "
-          f"partial/corrupt are rebuilt)")
+          f"partial/corrupt are rebuilt)", flush=True)
+    print(f"  validating existing outputs / simulating missing ones — progress every "
+          f"{HB_INTERVAL:.0f}s below:", flush=True)
 
     # 3) parallel run
     t0 = time.time(); done = err = rebuilt_n = 0
     tally = {}
     max_worker_rss = 0.0          # peak RSS any single worker reached -> max memory per thread
     prof = {}                     # chrom -> [n, sum_secs, max_secs, max_peak_mb]
+    checked_pop = {}              # pop -> units completed (any status), for the heartbeat
+    last_hb = t0
     with ProcessPoolExecutor(max_workers=a.workers) as ex:
         futs = {ex.submit(simulate_unit, u): u for u in units}
         for fut in as_completed(futs):
             r = fut.result(); done += 1
             tally[r["status"]] = tally.get(r["status"], 0) + 1
+            checked_pop[r["unit"][0]] = checked_pop.get(r["unit"][0], 0) + 1
             if "worker_rss_mb" in r:
                 max_worker_rss = max(max_worker_rss, r["worker_rss_mb"])
             if r["status"] == "ok":
@@ -335,11 +341,22 @@ def main():
                 pr[0] += 1; pr[1] += secs; pr[2] = max(pr[2], secs); pr[3] = max(pr[3], peak)
                 print(f"  [{done}/{n}] {p} sim{i} chr{c}: {r['n_sites']:,} sites "
                       f"(target {r['target']:,})" + (f" retry={r['under']}" if r['under'] else "")
-                      + f"  {secs:.1f}s peak={peak:,.0f}MB" + tag)
+                      + f"  {secs:.1f}s peak={peak:,.0f}MB" + tag, flush=True)
             elif r["status"] == "error":
-                err += 1; print(f"  [{done}/{n}] ERROR {r['unit']}: {r['msg']}")
+                err += 1; print(f"  [{done}/{n}] ERROR {r['unit']}: {r['msg']}", flush=True)
             elif r["status"] in ("no_demog", "zero_theta"):
-                print(f"  [{done}/{n}] SKIP {r['unit']} ({r['status']} {r.get('msg','')})")
+                print(f"  [{done}/{n}] SKIP {r['unit']} ({r['status']} {r.get('msg','')})", flush=True)
+
+            # heartbeat: skips print nothing on their own, so surface periodic progress
+            # (climbing skip count = existing outputs being validated) with a per-pop split
+            now = time.time()
+            if now - last_hb >= HB_INTERVAL:
+                last_hb = now
+                split = ", ".join(f"{p}={checked_pop[p]}" for p in pops if checked_pop.get(p))
+                print(f"  … {done}/{n} in {now-t0:.0f}s | skip={tally.get('skip',0)} "
+                      f"ok={tally.get('ok',0)} err={tally.get('error',0)}"
+                      + (f" rebuilt={rebuilt_n}" if rebuilt_n else "")
+                      + f" | checked: {split}", flush=True)
     dt = time.time() - t0
     print(f"\nDONE in {dt:.0f}s  ({dt/max(n,1):.1f}s/unit wall)  tally={tally}"
           + (f"  rebuilt_corrupt={rebuilt_n}" if rebuilt_n else ""))
