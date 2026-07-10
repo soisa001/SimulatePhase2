@@ -26,11 +26,12 @@ except ImportError:                       # pragma: no cover  (non-Unix dev box)
 
 # ─────────────────────────────── CONSTANTS ───────────────────────────────
 WINDOW_SIZE = 20_000
-# Diploid individuals per pop — set to the v9 cohort counts (full set), so simulated 2N
-# haplotypes match the 2N used downstream; downsample later if needed. (OTH is part of v9
-# but has no demography prior / theta map, so it is not simulated here.) Changing these ->
-# any existing .tsz with a different sample count is detected as stale and rebuilt on rerun.
-POP_SAMPLES = {"afr": 2641, "eur": 1858, "sas": 1196, "mid": 416, "eas": 1312, "amr": 2070}
+# Diploid individuals per pop — the v8 phlash panel counts (the demography was inferred on
+# v8, so sims use v8). Simulated 2N haplotypes match the 2N used downstream; downsample
+# later if needed. (OTH is in the panel but has no demography prior / theta map, so it is
+# not simulated here.) Changing these -> any existing .tsz with a different sample count is
+# detected as stale and rebuilt on rerun.
+POP_SAMPLES = {"afr": 2417, "eur": 1956, "sas": 1144, "mid": 351, "eas": 1228, "amr": 1664}
 PLOIDY      = 2
 RECOMB_RATE = 1e-8
 BASE_SEED   = 42

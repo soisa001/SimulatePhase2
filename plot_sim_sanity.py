@@ -11,12 +11,12 @@ diversity pi, plus a folded site-frequency spectrum, and writes into --out-dir:
     summary_by_pop.png     cross-pop Tajima's D + mean S/window vs target
     summary.tsv            per-pop numeric summary (incl. sample-size shortfall)
 
-Sample sizes (--size v9, default): analyses use the v9 per-pop sizes (V9_SAMPLES).
-Each sim is downsampled AT READ TIME by keeping the first 2*n haplotypes, i.e. dropping
-the later/higher-index individuals ("drop the later sample IDs"). Where v9 EXCEEDS the
-size a sim was generated with we cannot upsample: all available samples are used and the
-shortfall is reported (summary.tsv + a stderr warning). Use --size sim to instead use
-each sim's full sample set (useful to verify the theta calibration, realized ~ target).
+Sample sizes (--size panel, default): analyses use the v8 phlash-panel per-pop sizes
+(PANEL_SAMPLES) — the same sizes the sims were generated with, since the demography was
+inferred on v8. Each sim is downsampled AT READ TIME by keeping the first 2*n haplotypes,
+i.e. dropping the later/higher-index individuals; with panel == sim size this is a no-op
+(all samples kept). To subsample later, lower PANEL_SAMPLES. --size sim is equivalent here
+(full sim sample set), kept so a future smaller panel can be compared against full size.
 
 Usage:
     python plot_sim_sanity.py                        # first 5 sims/pop, chr1-22, defaults
@@ -35,10 +35,11 @@ import matplotlib.pyplot as plt
 
 WINDOW_SIZE = 20_000
 ALL_POPS = ["afr", "eur", "sas", "mid", "eas", "amr"]
-# v9 per-pop DIPLOID sample sizes to use in ALL downstream analyses (OTH not simulated).
-V9_SAMPLES  = {"afr": 2641, "eur": 1858, "amr": 2070, "eas": 1312, "sas": 1196, "mid": 416}
-# sims are (being) regenerated at the v9 sizes, so simulated == v9 (kept for shortfall logic).
-SIM_SAMPLES = dict(V9_SAMPLES)
+# v8 phlash-panel per-pop DIPLOID sample sizes = the sizes the sims were generated with
+# (demography inferred on v8). OTH (panel 2216) is not simulated (no prior / theta map).
+PANEL_SAMPLES = {"afr": 2417, "eur": 1956, "sas": 1144, "mid": 351, "eas": 1228, "amr": 1664}
+# simulated == panel, so no shortfall; kept as a separate name for the (future) subsample case.
+SIM_SAMPLES = dict(PANEL_SAMPLES)
 
 CFG = dict(sim_dir=Path("/scratch.global/soisa001/sims"),
            h5_path=Path("mvn/mutation_rate_map_perpop_all.h5"),
@@ -46,7 +47,7 @@ CFG = dict(sim_dir=Path("/scratch.global/soisa001/sims"),
 
 # ─────────────────────────────── worker ───────────────────────────────
 def _target_haps(pop, size_mode):
-    return 2 * (SIM_SAMPLES[pop] if size_mode == "sim" else V9_SAMPLES[pop])
+    return 2 * (SIM_SAMPLES[pop] if size_mode == "sim" else PANEL_SAMPLES[pop])
 
 def analyze_unit(job):
     """One (pop, sim, chrom): windowed S / Tajima's D / pi + folded SFS at the chosen
@@ -160,7 +161,7 @@ def plot_pop_genomewide(pop, idx, centers, boundaries, labels, Sg, Dg, Pg, targe
     axes[2].set_ylabel(r"$\pi$ / bp"); axes[2].set_xlabel("genome position (Mb, chr1..22 concatenated)")
     for ax in axes:
         _draw_chrom_guides(ax, boundaries, labels, ax.get_ylim()[1])
-    short = "" if want <= n_avail else f"  ⚠ v9 wants {want//2} dip but sim has {n_avail//2} (using all)"
+    short = "" if want <= n_avail else f"  ⚠ panel wants {want//2} dip but sim has {n_avail//2} (using all)"
     fig.suptitle(f"{pop.upper()}  genome-wide sanity  (size={size_mode}: "
                  f"{n_used//2} diploids / {n_used} haplotypes){short}", fontsize=11)
     fig.tight_layout(rect=(0, 0, 1, 0.98))
@@ -208,8 +209,8 @@ def main():
     ap.add_argument("--n-sims", type=int, default=5, help="first N sims per pop (sim_00000..)")
     ap.add_argument("--pops", type=str, default=",".join(ALL_POPS))
     ap.add_argument("--chroms", type=str, default="1-22")
-    ap.add_argument("--size", choices=["v9", "sim"], default="v9",
-                    help="v9: downsample to v9 sizes (drop later samples); sim: full sim size")
+    ap.add_argument("--size", choices=["panel", "sim"], default="panel",
+                    help="panel: use v8 panel sizes (drop later samples if smaller); sim: full sim size")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--sim-dir", type=Path); ap.add_argument("--h5", type=Path, dest="h5_path")
     ap.add_argument("--out-dir", type=Path)
@@ -220,21 +221,21 @@ def main():
             CFG[k] = v
 
     pops = [p for p in a.pops.split(",") if p]
-    bad = [p for p in pops if p not in V9_SAMPLES]
+    bad = [p for p in pops if p not in PANEL_SAMPLES]
     if bad:
-        sys.exit(f"unknown pop(s) {bad}; known: {list(V9_SAMPLES)}")
+        sys.exit(f"unknown pop(s) {bad}; known: {list(PANEL_SAMPLES)}")
     sims = list(range(a.n_sims))
     chrom_order = sorted(parse_chroms(a.chroms))
     CFG["out_dir"].mkdir(parents=True, exist_ok=True)
     print(f"pops={pops} sims=first {a.n_sims} chroms={chrom_order} size={a.size} workers={a.workers}")
     print(f"sim_dir={CFG['sim_dir']}  h5={CFG['h5_path']}  out={CFG['out_dir']}")
 
-    # sample-size reconciliation up front (loud about the v9 > sim shortfall)
-    print("  sample sizes (diploid) — v9 target vs simulated:")
+    # sample-size reconciliation up front (panel vs simulated; equal for v8 -> no shortfall)
+    print("  sample sizes (diploid) — panel target vs simulated:")
     for p in pops:
-        v9, sm = V9_SAMPLES[p], SIM_SAMPLES[p]
-        note = "ok (drop %d)" % (sm - v9) if sm >= v9 else "SHORTFALL: v9 exceeds sim by %d (using all %d)" % (v9 - sm, sm)
-        print(f"    {p}: v9={v9} sim={sm} -> {note}")
+        pn, sm = PANEL_SAMPLES[p], SIM_SAMPLES[p]
+        note = "ok (drop %d)" % (sm - pn) if sm >= pn else "SHORTFALL: panel exceeds sim by %d (using all %d)" % (pn - sm, sm)
+        print(f"    {p}: panel={pn} sim={sm} -> {note}")
 
     chrom_order, meta, genome_mid, n_win_genome, boundaries, labels, target = \
         load_genome_axis(chrom_order, pops)
@@ -289,8 +290,8 @@ def main():
         p2 = plot_pop_sfs(pop, afs_pop, n_used, CFG["out_dir"])
         Dpool[pop] = Dg[np.isfinite(Dg)]
         rows.append(dict(pop=pop, n_used_hap=n_used, n_used_dip=n_used // 2,
-                         v9_dip=V9_SAMPLES[pop], sim_dip=SIM_SAMPLES[pop],
-                         shortfall_dip=max(0, V9_SAMPLES[pop] - SIM_SAMPLES[pop]),
+                         panel_dip=PANEL_SAMPLES[pop], sim_dip=SIM_SAMPLES[pop],
+                         shortfall_dip=max(0, PANEL_SAMPLES[pop] - SIM_SAMPLES[pop]),
                          mean_S_realized=float(np.nanmean(Sg)),
                          mean_theta_target=float(np.nanmean(target[pop])),
                          mean_TajD=float(np.nanmean(Dg)), mean_pi=float(np.nanmean(Pg))))
@@ -299,7 +300,7 @@ def main():
     if rows:
         ps = plot_summary(rows, Dpool, CFG["out_dir"])
         tsv = CFG["out_dir"] / "summary.tsv"
-        cols = ["pop", "n_used_hap", "n_used_dip", "v9_dip", "sim_dip", "shortfall_dip",
+        cols = ["pop", "n_used_hap", "n_used_dip", "panel_dip", "sim_dip", "shortfall_dip",
                 "mean_S_realized", "mean_theta_target", "mean_TajD", "mean_pi"]
         with open(tsv, "w") as fh:
             fh.write("\t".join(cols) + "\n")
@@ -309,8 +310,8 @@ def main():
         print(f"\nDONE in {time.time()-t0:.0f}s. wrote {ps.name}, summary.tsv, and per-pop PNGs "
               f"to {CFG['out_dir']}  (missing={miss} error={err})")
         shortfalls = [r["pop"] for r in rows if r["shortfall_dip"] > 0]
-        if a.size == "v9" and shortfalls:
-            print(f"  ⚠ v9 sample size exceeds the simulated size for: {', '.join(shortfalls)} "
+        if a.size == "panel" and shortfalls:
+            print(f"  ⚠ panel sample size exceeds the simulated size for: {', '.join(shortfalls)} "
                   f"— plots for these use ALL simulated samples (see summary.tsv shortfall_dip).")
     else:
         print("\nno pops produced plots (all units missing?) — check --sim-dir")
