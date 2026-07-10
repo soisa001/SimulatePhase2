@@ -1,8 +1,8 @@
 # v8 phlash-panel per-pop DIPLOID sample sizes. The demography was inferred on v8, so the
 # sims use these v8 counts. Simulated == panel (downsample later if needed). OTH is in the
 # panel but is NOT simulated (no demography prior mvn/oth_mvn.npz and no OTH theta map).
-# The v9 sample-id list (data/aoulr.phase2.in_v9.sample_list.txt) was an earlier candidate
-# and is NOT the chosen spec.
+# Canonical id list: data/v8_phlash_panel.sample_list.txt (10,976 ids).
+# (data/aoulr.phase2.in_v9.sample_list.txt is a superseded v9 candidate, not the chosen spec.)
 pop	panel_diploid	simulated_at	note
 AFR	2417	2417
 EUR	1956	1956
