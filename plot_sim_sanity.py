@@ -37,8 +37,8 @@ WINDOW_SIZE = 20_000
 ALL_POPS = ["afr", "eur", "sas", "mid", "eas", "amr"]
 # v9 per-pop DIPLOID sample sizes to use in ALL downstream analyses (OTH not simulated).
 V9_SAMPLES  = {"afr": 2641, "eur": 1858, "amr": 2070, "eas": 1312, "sas": 1196, "mid": 416}
-# what the completed sims were actually generated with (old specs) — shortfall detection.
-SIM_SAMPLES = {"afr": 2417, "eur": 1956, "sas": 1144, "mid": 351, "eas": 1228, "amr": 1664}
+# sims are (being) regenerated at the v9 sizes, so simulated == v9 (kept for shortfall logic).
+SIM_SAMPLES = dict(V9_SAMPLES)
 
 CFG = dict(sim_dir=Path("/scratch.global/soisa001/sims"),
            h5_path=Path("mvn/mutation_rate_map_perpop_all.h5"),

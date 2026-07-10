@@ -26,9 +26,11 @@ except ImportError:                       # pragma: no cover  (non-Unix dev box)
 
 # ─────────────────────────────── CONSTANTS ───────────────────────────────
 WINDOW_SIZE = 20_000
-# Diploid individuals per pop — FIXED to the empirical cohort counts in the data
-# (merged_bcf), so simulated 2N haplotypes match the 2N used to compute empirical theta.
-POP_SAMPLES = {"afr": 2417, "eur": 1956, "sas": 1144, "mid": 351, "eas": 1228, "amr": 1664}
+# Diploid individuals per pop — set to the v9 cohort counts (full set), so simulated 2N
+# haplotypes match the 2N used downstream; downsample later if needed. (OTH is part of v9
+# but has no demography prior / theta map, so it is not simulated here.) Changing these ->
+# any existing .tsz with a different sample count is detected as stale and rebuilt on rerun.
+POP_SAMPLES = {"afr": 2641, "eur": 1858, "sas": 1196, "mid": 416, "eas": 1312, "amr": 2070}
 PLOIDY      = 2
 RECOMB_RATE = 1e-8
 BASE_SEED   = 42
@@ -160,7 +162,7 @@ def calibrate_chrom(demography, pop, n_samples, seq_len, theta_target, mask, see
     tb.sort(); tb.build_index(); tb.compute_mutation_parents()
     return tb.tree_sequence(), (needed if under else {})
 
-def tsz_is_complete(path, theta_target):
+def tsz_is_complete(path, theta_target, expected_haps=None):
     """Validate a finished output before trusting it for idempotent skip.
 
     A clean SIGKILL leaves only the .tsz.tmp (the .tsz rename is atomic), but a node
@@ -168,14 +170,19 @@ def tsz_is_complete(path, theta_target):
     — and any .tsz from an older non-atomic run has the same risk — leaving a .tsz that
     exists but is truncated/corrupt. Mere existence is therefore not enough.
 
-    Two checks: (1) it must decompress without error, and (2) the first 5 and last 5
-    windows that *should* carry a mutation (theta_target > 0) must each contain >=1 site.
-    A truncated table fails the load; a short/partial one fails the tail-window check.
+    Checks: (1) it must decompress without error; (2) if expected_haps is given, its
+    sample count must match (so a .tsz left over from a run with a DIFFERENT sample size
+    is treated as stale and rebuilt); and (3) the first 5 and last 5 windows that *should*
+    carry a mutation (theta_target > 0) must each contain >=1 site. A truncated table
+    fails the load; a wrong-size one fails the sample check; a short/partial one fails the
+    tail-window check.
     """
     try:
         ts = tszip.decompress(str(path))
     except Exception:
         return False
+    if expected_haps is not None and ts.num_samples != expected_haps:
+        return False                      # sample size changed since this file was written
     nz = np.nonzero(np.asarray(theta_target) > 0)[0]
     if nz.size == 0:
         return True                       # nothing should be present; loading cleanly is enough
@@ -241,9 +248,9 @@ def simulate_unit(unit):
         if int(theta.sum()) == 0:
             return dict(unit=unit, status="zero_theta")
         if out.exists():
-            if tsz_is_complete(out, theta):
+            if tsz_is_complete(out, theta, expected_haps=PLOIDY * POP_SAMPLES[pop]):
                 return dict(unit=unit, status="skip")
-            rebuilt = True                           # exists but partial/corrupt -> rebuild
+            rebuilt = True                           # partial/corrupt or wrong sample size -> rebuild
         else:
             rebuilt = False
         demo_path = CFG["demog_dir"] / pop / f"demo_{sim_idx:05d}.yaml"
@@ -333,7 +340,7 @@ def main():
                 max_worker_rss = max(max_worker_rss, r["worker_rss_mb"])
             if r["status"] == "ok":
                 p, i, c = r["unit"]
-                tag = " [rebuilt corrupt]" if r.get("rebuilt") else ""
+                tag = " [rebuilt]" if r.get("rebuilt") else ""
                 if r.get("rebuilt"):
                     rebuilt_n += 1
                 secs = r.get("secs", 0.0); peak = r.get("peak_mb", 0.0)
@@ -359,7 +366,7 @@ def main():
                       + f" | checked: {split}", flush=True)
     dt = time.time() - t0
     print(f"\nDONE in {dt:.0f}s  ({dt/max(n,1):.1f}s/unit wall)  tally={tally}"
-          + (f"  rebuilt_corrupt={rebuilt_n}" if rebuilt_n else ""))
+          + (f"  rebuilt={rebuilt_n}" if rebuilt_n else ""))
     if prof:
         print(f"  peak RSS per worker (max over {a.workers} workers): {max_worker_rss:,.0f} MB")
         print("  per-chrom profile (computed units only):")

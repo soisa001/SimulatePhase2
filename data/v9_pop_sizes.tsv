@@ -1,11 +1,12 @@
-# v9 per-pop DIPLOID sample sizes (analysis targets). OTH is not simulated.
-# sim_diploid = size the completed sims were actually generated with (old/v8 specs).
-pop	v9_diploid	sim_diploid	shortfall_v9_minus_sim
-AFR	2641	2417	224
-EUR	1858	1956	-98
-AMR	2070	1664	406
-EAS	1312	1228	84
-SAS	1196	1144	52
-MID	416	351	65
-OTH	2745	NA	NA
-TOTAL_in_v9	12238	NA	NA
+# v9 per-pop DIPLOID sample sizes. Sims are generated at these sizes (full set);
+# downsample later if needed. OTH is part of the v9 cohort but is NOT simulated
+# (no demography prior mvn/oth_mvn.npz and no OTH theta map in the h5).
+pop	v9_diploid	simulated_at	note
+AFR	2641	2641
+EUR	1858	1858
+AMR	2070	2070
+EAS	1312	1312
+SAS	1196	1196
+MID	416	416
+OTH	2745	NA	not simulated (no prior/theta)
+TOTAL_in_v9	12238	NA
