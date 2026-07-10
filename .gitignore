@@ -5,3 +5,6 @@ __pycache__/
 # Simulation outputs / data artifacts
 *.tsz
 *.tsz.tmp
+
+# Generated sanity plots (produced at runtime on the cluster)
+sim_sanity_plots/

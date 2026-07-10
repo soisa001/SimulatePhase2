@@ -1,0 +1,11 @@
+# v9 per-pop DIPLOID sample sizes (analysis targets). OTH is not simulated.
+# sim_diploid = size the completed sims were actually generated with (old/v8 specs).
+pop	v9_diploid	sim_diploid	shortfall_v9_minus_sim
+AFR	2641	2417	224
+EUR	1858	1956	-98
+AMR	2070	1664	406
+EAS	1312	1228	84
+SAS	1196	1144	52
+MID	416	351	65
+OTH	2745	NA	NA
+TOTAL_in_v9	12238	NA	NA
