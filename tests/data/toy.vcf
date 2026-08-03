@@ -1,0 +1,16 @@
+##fileformat=VCFv4.2
+##FILTER=<ID=PASS,Description="All filters passed">
+##FILTER=<ID=q10,Description="Toy filtered sibling">
+##contig=<ID=chr1,length=25000>
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	A01	A02	B01	B02	OTH
+chr1	1	.	A	G	.	PASS	.	GT	0/1	0/0	0/0	0/0	0/1
+chr1	9999	.	C	T	.	PASS	.	GT	1/1	1/1	0/1	0/0	0/0
+chr1	10001	.	A	C	.	PASS	.	GT	0/1	0/0	0/1	0/0	0/0
+chr1	10001	.	A	G	.	PASS	.	GT	0/0	0/1	0/0	0/1	0/0
+chr1	15000	.	A	AT	.	PASS	.	GT	0/1	0/0	0/1	0/0	0/0
+chr1	20000	.	A	C,G	.	PASS	.	GT	0/1	0/0	0/2	0/0	0/0
+chr1	21000	.	G	A	.	.	.	GT	0/1	0/0	0/1	0/0	0/0
+chr1	22000	.	G	A	.	.	.	GT	0/1	0/0	0/1	0/0	0/0
+chr1	22000	.	G	AT	.	q10	.	GT	0/1	0/0	0/1	0/0	0/0
+chr1	23000	.	T	C	.	PASS	.	GT	0/1	0/0	0/1	0/0	0/0

@@ -1,10 +1,29 @@
 # Python bytecode
 __pycache__/
 *.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
 
 # Simulation outputs / data artifacts
 *.tsz
 *.tsz.tmp
+*.tsz.json
+*.tsz.lock
+simulation_contract.json
+.simulation_contract.json.lock
+
+# Generated empirical maps, resumable shards, and simulation caches
+data/*.h5
+data/*.h5.json
+data/*.h5.sha256
+data/*.h5.lock
+mutation_map_work/
+snv_theta_map_work/
+snv_theta_bcf_cache/
+demographies/
+map_snapshots/
+sims/
 
 # Generated sanity plots (produced at runtime on the cluster)
 sim_sanity_plots/

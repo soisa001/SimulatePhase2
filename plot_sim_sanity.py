@@ -1,320 +1,930 @@
 #!/usr/bin/env python3
+"""Plot read-only sanity summaries for completed calibrated simulations.
+
+For the first N simulations of each requested population, this script computes
+windowed segregating sites, Tajima's D, nucleotide diversity, and a folded SFS.
+Window geometry, population names, and panel sample counts all come from the
+theta-map artifact produced by ``generate_map.py``.
+
+Outputs in ``--out-dir`` are:
+
+* ``{pop}_genomewide.png``: realized versus target segregating sites, Tajima's D,
+  and nucleotide diversity along the concatenated requested chromosomes;
+* ``{pop}_sfs.png``: folded SFS versus a neutral reference;
+* ``summary_by_pop.png`` and ``summary.tsv``: cross-population summaries.
+
+Examples::
+
+    python plot_sim_sanity.py
+    python plot_sim_sanity.py --n-sims 5 --workers 4 --pops AFR,EUR --chroms 1-5
 """
-Sanity plots for the completed calibrated simulations (read-only; separate from the
-runner). Points at the default sim outputs and the combined per-pop mutation-rate map.
 
-For the first N sims of each pop it computes, per 20 kb window and genome-wide
-(chr1..22), the realized seg-sites/window (theta_hat), Tajima's D, and nucleotide
-diversity pi, plus a folded site-frequency spectrum, and writes into --out-dir:
-    {pop}_genomewide.png   3-panel: S/window (vs target theta), Tajima's D, pi
-    {pop}_sfs.png          folded SFS vs neutral 1/i reference
-    summary_by_pop.png     cross-pop Tajima's D + mean S/window vs target
-    summary.tsv            per-pop numeric summary (incl. sample-size shortfall)
+from __future__ import annotations
 
-Sample sizes (--size panel, default): analyses use the v8 phlash-panel per-pop sizes
-(PANEL_SAMPLES) — the same sizes the sims were generated with, since the demography was
-inferred on v8. Each sim is downsampled AT READ TIME by keeping the first 2*n haplotypes,
-i.e. dropping the later/higher-index individuals; with panel == sim size this is a no-op
-(all samples kept). To subsample later, lower PANEL_SAMPLES. --size sim is equivalent here
-(full sim sample set), kept so a future smaller panel can be compared against full size.
-
-Usage:
-    python plot_sim_sanity.py                        # first 5 sims/pop, chr1-22, defaults
-    python plot_sim_sanity.py --n-sims 5 --workers 4 --pops afr,eur --chroms 1-5
-"""
-import os, argparse, sys, time, traceback
-for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
-           "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
-    os.environ.setdefault(_v, "1")
+import argparse
+import hashlib
+import json
+import os
+import sys
+import time
+import traceback
+from collections.abc import Iterable, Iterator
+from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
+from dataclasses import dataclass
 from pathlib import Path
-from concurrent.futures import ProcessPoolExecutor, as_completed
-import numpy as np, h5py, tszip
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 
-WINDOW_SIZE = 20_000
-ALL_POPS = ["afr", "eur", "sas", "mid", "eas", "amr"]
-# v8 phlash-panel per-pop DIPLOID sample sizes = the sizes the sims were generated with
-# (demography inferred on v8). OTH (panel 2216) is not simulated (no prior / theta map).
-PANEL_SAMPLES = {"afr": 2417, "eur": 1956, "sas": 1144, "mid": 351, "eas": 1228, "amr": 1664}
-# simulated == panel, so no shortfall; kept as a separate name for the (future) subsample case.
-SIM_SAMPLES = dict(PANEL_SAMPLES)
+# Each process handles one tree sequence at a time. Prevent numerical libraries
+# from creating another thread pool inside every worker.
+for _variable in (
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+):
+    os.environ.setdefault(_variable, "1")
+os.environ.setdefault("MPLBACKEND", "Agg")
 
-CFG = dict(sim_dir=Path("/scratch.global/soisa001/sims"),
-           h5_path=Path("mvn/mutation_rate_map_perpop_all.h5"),
-           out_dir=Path("sim_sanity_plots"))
+import h5py  # noqa: E402
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
+import tszip  # noqa: E402
 
-# ─────────────────────────────── worker ───────────────────────────────
-def _target_haps(pop, size_mode):
-    return 2 * (SIM_SAMPLES[pop] if size_mode == "sim" else PANEL_SAMPLES[pop])
+from phase2_map import SCHEMA, canonical_chrom, map_sample_counts, parse_chroms  # noqa: E402
 
-def analyze_unit(job):
-    """One (pop, sim, chrom): windowed S / Tajima's D / pi + folded SFS at the chosen
-    sample size. Downsamples by keeping the first 2*n haplotypes (drop later samples)."""
-    pop, sim_idx, chrom, size_mode = job
-    path = CFG["sim_dir"] / pop / f"sim_{sim_idx:05d}" / f"chr{chrom}.tsz"
-    if not path.exists():
-        return dict(pop=pop, sim=sim_idx, chrom=chrom, status="missing", msg=str(path))
+DEFAULT_MAP = Path("data/snv_theta_map.10kb.h5")
+DEFAULT_SIM_DIR = Path("sims")
+DEFAULT_OUT_DIR = Path("sim_sanity_plots")
+MAX_DISPLAY_BINS = 2_500
+MAX_DISTRIBUTION_VALUES = 200_000
+
+
+@dataclass(frozen=True)
+class ChromosomeLayout:
+    edges: np.ndarray
+    output_slice: slice
+
+
+@dataclass(frozen=True)
+class GenomeLayout:
+    window_size: int
+    chromosomes: tuple[str, ...]
+    chromosome_layouts: dict[str, ChromosomeLayout]
+    genome_midpoints: np.ndarray
+    boundaries: np.ndarray
+    labels: tuple[str, ...]
+    targets: dict[str, np.ndarray]
+
+    @property
+    def n_windows(self) -> int:
+        return len(self.genome_midpoints)
+
+
+@dataclass
+class PopulationAccumulator:
+    target: np.ndarray
+    binned_sum: dict[str, np.ndarray]
+    binned_count: dict[str, np.ndarray]
+    traces: dict[str, list[np.ndarray]]
+    distribution_values: list[np.ndarray]
+    afs: np.ndarray | None
+    sum_stat: dict[str, float]
+    count_stat: dict[str, int]
+    used_haplotypes: list[int]
+    available_haplotypes: list[int]
+    distribution_count: int = 0
+    units_ok: int = 0
+    sims_with_data: int = 0
+
+
+_WORKER_SIM_DIR: Path | None = None
+_WORKER_EDGES: dict[str, np.ndarray] = {}
+_WORKER_PANEL_HAPLOTYPES: dict[str, int] = {}
+_WORKER_MAP_SHA256 = ""
+
+
+def contract_signature(contract: dict[str, object]) -> str:
+    """Match the canonical unit-contract signature written by ``run_sim.py``."""
+    encoded = json.dumps(contract, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def init_worker(
+    sim_dir: str,
+    edges: dict[str, np.ndarray],
+    panel_sample_counts: dict[str, int],
+    map_sha256: str,
+) -> None:
+    """Install immutable analysis metadata once in each spawned worker."""
+    global _WORKER_SIM_DIR, _WORKER_EDGES, _WORKER_PANEL_HAPLOTYPES, _WORKER_MAP_SHA256
+    _WORKER_SIM_DIR = Path(sim_dir)
+    _WORKER_EDGES = edges
+    _WORKER_PANEL_HAPLOTYPES = {
+        population: 2 * count for population, count in panel_sample_counts.items()
+    }
+    _WORKER_MAP_SHA256 = map_sha256
+
+
+def validate_sidecar(
+    path: Path,
+    *,
+    population: str,
+    simulation: int,
+    chromosome: str,
+    expected_diploids: int,
+) -> None:
+    """Reject incomplete, stale, or internally inconsistent simulation metadata."""
+    sidecar = path.with_suffix(path.suffix + ".json")
+    if not sidecar.is_file():
+        raise ValueError(f"required completion sidecar is missing: {sidecar}")
     try:
-        ts = tszip.decompress(str(path))
-        samp = ts.samples()
-        avail = int(samp.size)
-        want = _target_haps(pop, size_mode)
-        keep = samp[:min(want, avail)]                    # first 2n haps = drop later samples
-        with h5py.File(CFG["h5_path"], "r") as f:
-            we = np.asarray(f[f"chr{chrom}"]["window_ends"][...], float)
-        seq_len = float(ts.sequence_length)
-        edges = np.concatenate([[0.0], we])
-        edges[-1] = min(edges[-1], seq_len)               # guard tiny float overrun
-        # one sample set -> tskit returns shape (n_windows, 1); ravel to 1D per window
-        S  = np.asarray(ts.segregating_sites(sample_sets=[keep], windows=edges, mode="site", span_normalise=False)).ravel()
-        D  = np.asarray(ts.Tajimas_D(sample_sets=[keep], windows=edges, mode="site")).ravel()
-        pi = np.asarray(ts.diversity(sample_sets=[keep], windows=edges, mode="site", span_normalise=True)).ravel()
-        afs = np.asarray(ts.allele_frequency_spectrum(sample_sets=[keep], mode="site",
-                                                      polarised=False, span_normalise=False)).ravel()
-        return dict(pop=pop, sim=sim_idx, chrom=chrom, status="ok",
-                    S=S.astype(np.float64), D=D.astype(np.float64),
-                    pi=pi.astype(np.float64), afs=afs.astype(np.float64),
-                    n_used=int(keep.size), n_avail=avail, want=int(want),
-                    shortfall=int(max(0, want - avail)))
+        metadata = json.loads(sidecar.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"cannot read completion sidecar {sidecar}: {error}") from error
+    if metadata.get("status") != "complete":
+        raise ValueError(f"sidecar status is not complete: {sidecar}")
+    contract = metadata.get("contract")
+    if not isinstance(contract, dict):
+        raise ValueError(f"sidecar has no simulation contract: {sidecar}")
+    signature = metadata.get("signature")
+    if not isinstance(signature, str) or not signature:
+        raise ValueError(f"sidecar has no signature: {sidecar}")
+    expected_signature = contract_signature(contract)
+    if signature != expected_signature:
+        raise ValueError(f"sidecar signature does not match its contract: {sidecar}")
+    expected_contract = {
+        "map_sha256": _WORKER_MAP_SHA256,
+        "population": population,
+        "simulation": simulation,
+        "chromosome": chromosome,
+        "diploid_samples": expected_diploids,
+    }
+    mismatches = {
+        key: (contract.get(key), expected)
+        for key, expected in expected_contract.items()
+        if contract.get(key) != expected
+    }
+    if mismatches:
+        raise ValueError(f"sidecar contract mismatch {mismatches}: {sidecar}")
+    if int(metadata.get("size_bytes", -1)) != path.stat().st_size:
+        raise ValueError(f"sidecar size does not match tree-sequence file: {sidecar}")
+
+
+def analyze_unit(job: tuple[str, int, str, str]) -> dict[str, object]:
+    """Analyze one population/simulation/chromosome tree sequence."""
+    population, simulation, chromosome, size_mode = job
+    if _WORKER_SIM_DIR is None:
+        raise RuntimeError("worker was not initialized")
+    path = _WORKER_SIM_DIR / population.lower() / f"sim_{simulation:05d}" / f"{chromosome}.tsz"
+    if not path.is_file():
+        return {
+            "population": population,
+            "simulation": simulation,
+            "chromosome": chromosome,
+            "status": "missing",
+            "message": str(path),
+        }
+    try:
+        expected_haplotypes = _WORKER_PANEL_HAPLOTYPES[population]
+        validate_sidecar(
+            path,
+            population=population,
+            simulation=simulation,
+            chromosome=chromosome,
+            expected_diploids=expected_haplotypes // 2,
+        )
+        tree_sequence = tszip.decompress(str(path))
+        edges = _WORKER_EDGES[chromosome]
+        if not np.isclose(tree_sequence.sequence_length, edges[-1]):
+            raise ValueError(
+                f"sequence length {tree_sequence.sequence_length:g} does not match "
+                f"map length {edges[-1]:g}"
+            )
+        samples = tree_sequence.samples()
+        available = int(len(samples))
+        if available < expected_haplotypes:
+            raise ValueError(
+                f"sample shortfall: map requires {expected_haplotypes // 2} diploids "
+                f"({expected_haplotypes} haplotypes), but tree sequence has "
+                f"{available // 2} diploids ({available} haplotypes)"
+            )
+        wanted = available if size_mode == "sim" else expected_haplotypes
+        keep = samples[:wanted]
+        if len(keep) < 2:
+            raise ValueError("fewer than two haploid samples are available")
+
+        segregating = np.asarray(
+            tree_sequence.segregating_sites(
+                sample_sets=[keep], windows=edges, mode="site", span_normalise=False
+            )
+        ).ravel()
+        tajimas_d = np.asarray(
+            tree_sequence.Tajimas_D(sample_sets=[keep], windows=edges, mode="site")
+        ).ravel()
+        diversity = np.asarray(
+            tree_sequence.diversity(
+                sample_sets=[keep], windows=edges, mode="site", span_normalise=True
+            )
+        ).ravel()
+        afs = np.asarray(
+            tree_sequence.allele_frequency_spectrum(
+                sample_sets=[keep],
+                mode="site",
+                polarised=False,
+                span_normalise=False,
+            )
+        ).ravel()
+        return {
+            "population": population,
+            "simulation": simulation,
+            "chromosome": chromosome,
+            "status": "ok",
+            "segregating": segregating.astype(np.float32, copy=False),
+            "tajimas_d": tajimas_d.astype(np.float32, copy=False),
+            "diversity": diversity.astype(np.float32, copy=False),
+            "afs": afs.astype(np.float64, copy=False),
+            "used": int(len(keep)),
+            "available": available,
+            "wanted": int(wanted),
+        }
     except Exception:
-        return dict(pop=pop, sim=sim_idx, chrom=chrom, status="error",
-                    msg=traceback.format_exc().splitlines()[-1])
+        return {
+            "population": population,
+            "simulation": simulation,
+            "chromosome": chromosome,
+            "status": "error",
+            "message": traceback.format_exc().splitlines()[-1],
+        }
 
-# ─────────────────────────────── helpers ───────────────────────────────
-def parse_chroms(s):
-    out = []
-    for tok in s.split(","):
-        if "-" in tok:
-            a, b = tok.split("-"); out += list(range(int(a), int(b) + 1))
-        else:
-            out.append(int(tok))
-    return out
 
-def bin_mean(idx, v, n_bins):
-    """nan-aware mean of v grouped into n_bins by precomputed bin index idx."""
-    v = np.asarray(v, float); ok = np.isfinite(v)
-    s = np.bincount(idx[ok], weights=v[ok], minlength=n_bins)
-    c = np.bincount(idx[ok], minlength=n_bins)
-    out = np.full(n_bins, np.nan); nz = c > 0; out[nz] = s[nz] / c[nz]
-    return out
+def bounded_results(
+    executor: ProcessPoolExecutor,
+    jobs: Iterable[tuple[str, int, str, str]],
+    max_pending: int,
+) -> Iterator[dict[str, object]]:
+    """Yield worker results while retaining at most ``max_pending`` futures."""
+    iterator = iter(jobs)
+    pending: set[Future[dict[str, object]]] = set()
+    for _ in range(max_pending):
+        try:
+            pending.add(executor.submit(analyze_unit, next(iterator)))
+        except StopIteration:
+            break
+    while pending:
+        completed, pending = wait(pending, return_when=FIRST_COMPLETED)
+        for future in completed:
+            yield future.result()
+            try:
+                pending.add(executor.submit(analyze_unit, next(iterator)))
+            except StopIteration:
+                pass
 
-def load_genome_axis(chrom_order, pops):
-    """From the h5: per-chrom window structure + target theta, and the genome-wide axis
-    (window midpoints with chromosome offsets, chrom boundaries, per-pop target arrays)."""
-    meta = {}          # chrom -> dict(we, nwin, seq_len, slice)
-    mids = []          # genome-coordinate window midpoints
-    offset = 0.0; start = 0; boundaries = [0.0]; labels = []
-    with h5py.File(CFG["h5_path"], "r") as f:
-        avail_chroms = {int(k[3:]) for k in f if k.startswith("chr") and k[3:].isdigit()}
-        chrom_order = [c for c in chrom_order if c in avail_chroms]
-        for c in chrom_order:
-            we = np.asarray(f[f"chr{c}"]["window_ends"][...], float)
-            nwin = len(we); seq_len = float(we[-1])
-            edges = np.concatenate([[0.0], we])
-            mids.append((edges[:-1] + edges[1:]) / 2.0 + offset)
-            meta[c] = dict(we=we, nwin=nwin, seq_len=seq_len, slice=slice(start, start + nwin))
-            start += nwin; offset += seq_len
-            boundaries.append(offset); labels.append(f"chr{c}")
-        genome_mid = np.concatenate(mids) if mids else np.zeros(0)
-        n_win_genome = start
-        target = {}    # pop -> genome-wide target theta (seg sites/window at full sim size)
-        for pop in pops:
-            t = np.full(n_win_genome, np.nan)
-            for c in chrom_order:
-                t[meta[c]["slice"]] = np.asarray(f[f"chr{c}"][pop]["theta"][...], float)
-            target[pop] = t
-    return chrom_order, meta, genome_mid, n_win_genome, np.array(boundaries), labels, target
 
-def _draw_chrom_guides(ax, boundaries, labels, ymax_axis):
-    for b in boundaries:
-        ax.axvline(b / 1e6, color="grey", lw=0.4, alpha=0.5)
+def decode_strings(values: np.ndarray) -> list[str]:
+    return [value.decode() if isinstance(value, bytes) else str(value) for value in values]
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(8 * 1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def read_map_header(path: Path) -> tuple[int, list[str], dict[str, int]]:
+    """Read and validate map-wide metadata used by both plotting and simulation."""
+    with h5py.File(path, "r") as handle:
+        schema = str(handle.attrs.get("schema", ""))
+        if schema != SCHEMA:
+            raise ValueError(f"{path} has schema {schema!r}, expected {SCHEMA!r}")
+        if not bool(handle.attrs.get("complete", False)):
+            raise ValueError(f"{path} is not marked complete")
+        window_size = int(handle.attrs.get("window_size", 0))
+        if window_size <= 0:
+            raise ValueError("map root has no positive window_size")
+        if "populations" not in handle or "samples" not in handle:
+            raise ValueError("map is missing embedded populations or samples")
+        populations = [value.upper() for value in decode_strings(handle["populations"][...])]
+    sample_counts = map_sample_counts(path)
+    missing = [population for population in populations if sample_counts.get(population, 0) <= 0]
+    if missing:
+        raise ValueError(f"map has no embedded samples for {missing}")
+    return window_size, populations, sample_counts
+
+
+def population_group(group: h5py.Group, population: str) -> h5py.Group:
+    for key in (population.lower(), population.upper(), population):
+        if key in group and isinstance(group[key], h5py.Group):
+            return group[key]
+    raise KeyError(f"population {population} is absent from {group.name}")
+
+
+def load_genome_layout(
+    path: Path,
+    chromosomes: list[str],
+    populations: list[str],
+    sample_counts: dict[str, int],
+) -> GenomeLayout:
+    """Load compact map geometry and target vectors once in the parent process."""
+    layouts: dict[str, ChromosomeLayout] = {}
+    midpoints: list[np.ndarray] = []
+    boundaries = [0.0]
+    targets_by_chrom: dict[str, dict[str, np.ndarray]] = {
+        population: {} for population in populations
+    }
+    offset = 0.0
+    output_start = 0
+    with h5py.File(path, "r") as handle:
+        window_size = int(handle.attrs["window_size"])
+        absent = [chromosome for chromosome in chromosomes if chromosome not in handle]
+        if absent:
+            raise ValueError(f"map is missing requested chromosomes: {absent}")
+        for chromosome in chromosomes:
+            group = handle[chromosome]
+            starts = np.asarray(group["window_starts"], dtype=np.int64)
+            ends = np.asarray(group["window_ends"], dtype=np.int64)
+            length_bp = int(group.attrs["length_bp"])
+            if (
+                len(starts) == 0
+                or starts.shape != ends.shape
+                or starts[0] != 0
+                or ends[-1] != length_bp
+                or not np.array_equal(starts[1:], ends[:-1])
+            ):
+                raise ValueError(f"invalid window geometry for {chromosome}")
+            widths = ends - starts
+            if np.any(widths <= 0) or np.any(widths > window_size):
+                raise ValueError(f"invalid window widths for {chromosome}")
+            count = len(starts)
+            layouts[chromosome] = ChromosomeLayout(
+                edges=np.concatenate(([0.0], ends.astype(float))),
+                output_slice=slice(output_start, output_start + count),
+            )
+            midpoints.append((starts + (ends - starts) / 2.0) + offset)
+            output_start += count
+            offset += length_bp
+            boundaries.append(offset)
+            for population in populations:
+                pop_group = population_group(group, population)
+                theta = np.asarray(pop_group["theta"], dtype=np.float32)
+                if theta.shape != starts.shape:
+                    raise ValueError(f"theta shape mismatch for {population}/{chromosome}")
+                declared_count = int(pop_group["theta"].attrs.get("sample_count", 0))
+                if declared_count and declared_count != sample_counts[population]:
+                    raise ValueError(
+                        f"sample-count mismatch for {population}/{chromosome}: "
+                        f"{declared_count} != {sample_counts[population]}"
+                    )
+                targets_by_chrom[population][chromosome] = theta
+
+    targets = {
+        population: np.concatenate(
+            [targets_by_chrom[population][chromosome] for chromosome in chromosomes]
+        )
+        for population in populations
+    }
+    return GenomeLayout(
+        window_size=window_size,
+        chromosomes=tuple(chromosomes),
+        chromosome_layouts=layouts,
+        genome_midpoints=np.concatenate(midpoints),
+        boundaries=np.asarray(boundaries),
+        labels=tuple(chromosomes),
+        targets=targets,
+    )
+
+
+def bin_mean(indices: np.ndarray, values: np.ndarray, n_bins: int) -> np.ndarray:
+    """Return the finite-value mean in each precomputed display bin."""
+    values = np.asarray(values, dtype=float)
+    valid = np.isfinite(values)
+    sums = np.bincount(indices[valid], weights=values[valid], minlength=n_bins)
+    counts = np.bincount(indices[valid], minlength=n_bins)
+    result = np.full(n_bins, np.nan)
+    nonempty = counts > 0
+    result[nonempty] = sums[nonempty] / counts[nonempty]
+    return result
+
+
+def add_binned(accumulator: PopulationAccumulator, name: str, values: np.ndarray) -> None:
+    valid = np.isfinite(values)
+    accumulator.binned_sum[name][valid] += values[valid]
+    accumulator.binned_count[name][valid] += 1
+
+
+def statistic_mean(accumulator: PopulationAccumulator, name: str) -> float:
+    count = accumulator.count_stat[name]
+    return accumulator.sum_stat[name] / count if count else float("nan")
+
+
+def binned_average(accumulator: PopulationAccumulator, name: str) -> np.ndarray:
+    result = np.full_like(accumulator.binned_sum[name], np.nan)
+    valid = accumulator.binned_count[name] > 0
+    result[valid] = accumulator.binned_sum[name][valid] / accumulator.binned_count[name][valid]
+    return result
+
+
+def format_window_size(window_size: int) -> str:
+    if window_size % 1_000_000 == 0:
+        return f"{window_size / 1_000_000:g} Mb"
+    if window_size % 1_000 == 0:
+        return f"{window_size / 1_000:g} kb"
+    return f"{window_size:,} bp"
+
+
+def draw_chromosome_guides(axis: plt.Axes, boundaries: np.ndarray, labels: tuple[str, ...]) -> None:
+    ymax = axis.get_ylim()[1]
+    for boundary in boundaries:
+        axis.axvline(boundary / 1e6, color="grey", linewidth=0.4, alpha=0.5)
     mids = (boundaries[:-1] + boundaries[1:]) / 2.0
-    for m, lab in zip(mids, labels):
-        ax.text(m / 1e6, ymax_axis, lab.replace("chr", ""), ha="center", va="bottom",
-                fontsize=6, color="grey", clip_on=False)
+    for midpoint, label in zip(mids, labels, strict=True):
+        axis.text(
+            midpoint / 1e6,
+            ymax,
+            canonical_chrom(label)[3:],
+            ha="center",
+            va="bottom",
+            fontsize=6,
+            color="grey",
+            clip_on=False,
+        )
 
-def plot_pop_genomewide(pop, idx, centers, boundaries, labels, Sg, Dg, Pg, target,
-                        n_used, n_avail, want, out_dir, size_mode):
-    n_sims = Sg.shape[0]
-    fig, axes = plt.subplots(3, 1, figsize=(15, 9), sharex=True)
-    xc = centers / 1e6
-    # panel 0: seg sites / window (realized) vs target theta
-    for si in range(n_sims):
-        axes[0].plot(xc, bin_mean(idx, Sg[si], len(centers)), lw=0.4, alpha=0.30, color="C0")
-    axes[0].plot(xc, bin_mean(idx, np.nanmean(Sg, axis=0), len(centers)),
-                 lw=1.3, color="C0", label=f"realized (mean of {n_sims} sims)")
-    axes[0].plot(xc, bin_mean(idx, target, len(centers)),
-                 lw=1.0, ls="--", color="k", label="target theta (full-size calibration)")
-    axes[0].set_ylabel("seg sites / 20 kb"); axes[0].legend(loc="upper right", fontsize=8)
-    # panel 1: Tajima's D
-    for si in range(n_sims):
-        axes[1].plot(xc, bin_mean(idx, Dg[si], len(centers)), lw=0.4, alpha=0.30, color="C1")
-    axes[1].plot(xc, bin_mean(idx, np.nanmean(Dg, axis=0), len(centers)), lw=1.3, color="C1")
-    axes[1].axhline(0.0, color="k", lw=0.6, ls=":")
+
+def sample_range(values: list[int], *, diploid: bool = False) -> str:
+    if not values:
+        return "unknown"
+    low, high = min(values), max(values)
+    if diploid:
+        low, high = low // 2, high // 2
+    return str(low) if low == high else f"{low}-{high}"
+
+
+def plot_population_genomewide(
+    population: str,
+    accumulator: PopulationAccumulator,
+    centers: np.ndarray,
+    layout: GenomeLayout,
+    panel_count: int,
+    out_dir: Path,
+    size_mode: str,
+) -> Path:
+    figure, axes = plt.subplots(3, 1, figsize=(15, 9), sharex=True)
+    x = centers / 1e6
+    colors = {"segregating": "C0", "tajimas_d": "C1", "diversity": "C2"}
+    for name, axis in zip(colors, axes, strict=True):
+        for trace in accumulator.traces[name]:
+            axis.plot(x, trace, linewidth=0.4, alpha=0.3, color=colors[name])
+        axis.plot(
+            x,
+            binned_average(accumulator, name),
+            linewidth=1.3,
+            color=colors[name],
+            label=(
+                f"realized (mean of {accumulator.sims_with_data} sims)"
+                if name == "segregating"
+                else None
+            ),
+        )
+    axes[0].plot(
+        x,
+        binned_average(accumulator, "target"),
+        linewidth=1.0,
+        linestyle="--",
+        color="black",
+        label="target theta",
+    )
+    window_label = format_window_size(layout.window_size)
+    axes[0].set_ylabel(f"seg sites / {window_label}")
+    axes[0].legend(loc="upper right", fontsize=8)
+    axes[1].axhline(0.0, color="black", linewidth=0.6, linestyle=":")
     axes[1].set_ylabel("Tajima's D")
-    # panel 2: pi
-    for si in range(n_sims):
-        axes[2].plot(xc, bin_mean(idx, Pg[si], len(centers)), lw=0.4, alpha=0.30, color="C2")
-    axes[2].plot(xc, bin_mean(idx, np.nanmean(Pg, axis=0), len(centers)), lw=1.3, color="C2")
-    axes[2].set_ylabel(r"$\pi$ / bp"); axes[2].set_xlabel("genome position (Mb, chr1..22 concatenated)")
-    for ax in axes:
-        _draw_chrom_guides(ax, boundaries, labels, ax.get_ylim()[1])
-    short = "" if want <= n_avail else f"  ⚠ panel wants {want//2} dip but sim has {n_avail//2} (using all)"
-    fig.suptitle(f"{pop.upper()}  genome-wide sanity  (size={size_mode}: "
-                 f"{n_used//2} diploids / {n_used} haplotypes){short}", fontsize=11)
-    fig.tight_layout(rect=(0, 0, 1, 0.98))
-    p = out_dir / f"{pop}_genomewide.png"; fig.savefig(p, dpi=130); plt.close(fig)
-    return p
+    axes[2].set_ylabel(r"$\pi$ / bp")
+    axes[2].set_xlabel("genome position (Mb; requested chromosomes concatenated)")
+    for axis in axes:
+        draw_chromosome_guides(axis, layout.boundaries, layout.labels)
+    used = sample_range(accumulator.used_haplotypes, diploid=True)
+    available = sample_range(accumulator.available_haplotypes, diploid=True)
+    figure.suptitle(
+        f"{population} genome-wide sanity (size={size_mode}; used {used} diploids, "
+        f"available {available}, map panel {panel_count})",
+        fontsize=11,
+    )
+    figure.tight_layout(rect=(0, 0, 1, 0.98))
+    output = out_dir / f"{population.lower()}_genomewide.png"
+    figure.savefig(output, dpi=130)
+    plt.close(figure)
+    return output
 
-def plot_pop_sfs(pop, afs, n_used, out_dir):
+
+def plot_population_sfs(
+    population: str, afs: np.ndarray | None, used_haplotypes: list[int], out_dir: Path
+) -> Path | None:
     if afs is None or afs.size < 3:
         return None
-    n = afs.size - 1                                   # number of haplotypes
-    k = np.arange(1, n // 2 + 1)                        # folded minor-allele-count bins
-    obs = afs[1:n // 2 + 1]
-    ref = 1.0 / k; ref = ref / ref.sum() * np.nansum(obs)   # neutral 1/i, scaled to obs total
-    fig, ax = plt.subplots(figsize=(6, 4.5))
-    ax.loglog(k, obs, ".", ms=3, label="observed (summed over sims/chroms)")
-    ax.loglog(k, ref, "-", lw=1, color="k", alpha=0.7, label=r"neutral $\propto 1/i$")
-    ax.set_xlabel("minor allele count"); ax.set_ylabel("number of sites")
-    ax.set_title(f"{pop.upper()} folded SFS  ({n_used} haplotypes)")
-    ax.legend(fontsize=8); fig.tight_layout()
-    p = out_dir / f"{pop}_sfs.png"; fig.savefig(p, dpi=130); plt.close(fig)
-    return p
+    n_haplotypes = len(afs) - 1
+    counts = np.arange(1, n_haplotypes // 2 + 1)
+    observed = afs[1 : n_haplotypes // 2 + 1]
+    reference = 1.0 / counts + 1.0 / (n_haplotypes - counts)
+    if n_haplotypes % 2 == 0:
+        reference[-1] = 1.0 / counts[-1]
+    reference = reference / reference.sum() * np.nansum(observed)
+    figure, axis = plt.subplots(figsize=(6, 4.5))
+    axis.loglog(counts, observed, ".", markersize=3, label="observed (all analyzed units)")
+    axis.loglog(
+        counts,
+        reference,
+        "-",
+        linewidth=1,
+        color="black",
+        alpha=0.7,
+        label=r"folded neutral $\propto 1/i + 1/(n-i)$",
+    )
+    axis.set_xlabel("minor allele count")
+    axis.set_ylabel("number of sites")
+    axis.set_title(f"{population} folded SFS ({sample_range(used_haplotypes)} haplotypes)")
+    axis.legend(fontsize=8)
+    figure.tight_layout()
+    output = out_dir / f"{population.lower()}_sfs.png"
+    figure.savefig(output, dpi=130)
+    plt.close(figure)
+    return output
 
-def plot_summary(rows, Dpool, out_dir):
-    pops = [r["pop"] for r in rows]
-    fig, axes = plt.subplots(1, 2, figsize=(13, 5))
-    # left: genome-wide Tajima's D distribution per pop
-    data = [Dpool[p] for p in pops]
-    axes[0].boxplot(data, tick_labels=[p.upper() for p in pops], showfliers=False)
-    axes[0].axhline(0.0, color="k", lw=0.6, ls=":")
-    axes[0].set_ylabel("Tajima's D (per-window, all sims)"); axes[0].set_title("Tajima's D by pop")
-    # right: mean seg sites / window realized vs target
-    x = np.arange(len(pops)); w = 0.38
-    axes[1].bar(x - w / 2, [r["mean_S_realized"] for r in rows], w, label="realized", color="C0")
-    axes[1].bar(x + w / 2, [r["mean_theta_target"] for r in rows], w, label="target", color="grey")
-    axes[1].set_xticks(x); axes[1].set_xticklabels([p.upper() for p in pops])
-    axes[1].set_ylabel("mean seg sites / 20 kb"); axes[1].set_title("realized vs target theta")
+
+def plot_summary(
+    rows: list[dict[str, object]],
+    distributions: dict[str, np.ndarray],
+    window_size: int,
+    out_dir: Path,
+) -> Path:
+    populations = [str(row["pop"]) for row in rows]
+    figure, axes = plt.subplots(1, 2, figsize=(13, 5))
+    axes[0].boxplot(
+        [
+            distributions[population] if len(distributions[population]) else np.asarray([np.nan])
+            for population in populations
+        ],
+        tick_labels=populations,
+        showfliers=False,
+    )
+    axes[0].axhline(0.0, color="black", linewidth=0.6, linestyle=":")
+    axes[0].set_ylabel("Tajima's D (sampled windows across sims)")
+    axes[0].set_title("Tajima's D by population")
+
+    positions = np.arange(len(populations))
+    width = 0.38
+    axes[1].bar(
+        positions - width / 2,
+        [float(row["mean_S_realized"]) for row in rows],
+        width,
+        label="realized",
+        color="C0",
+    )
+    axes[1].bar(
+        positions + width / 2,
+        [float(row["mean_theta_target"]) for row in rows],
+        width,
+        label="target",
+        color="grey",
+    )
+    axes[1].set_xticks(positions)
+    axes[1].set_xticklabels(populations)
+    axes[1].set_ylabel(f"mean seg sites / {format_window_size(window_size)}")
+    axes[1].set_title("realized versus target theta")
     axes[1].legend(fontsize=8)
-    fig.tight_layout()
-    p = out_dir / "summary_by_pop.png"; fig.savefig(p, dpi=130); plt.close(fig)
-    return p
+    figure.tight_layout()
+    output = out_dir / "summary_by_pop.png"
+    figure.savefig(output, dpi=130)
+    plt.close(figure)
+    return output
 
-# ─────────────────────────────── driver ───────────────────────────────
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--n-sims", type=int, default=5, help="first N sims per pop (sim_00000..)")
-    ap.add_argument("--pops", type=str, default=",".join(ALL_POPS))
-    ap.add_argument("--chroms", type=str, default="1-22")
-    ap.add_argument("--size", choices=["panel", "sim"], default="panel",
-                    help="panel: use v8 panel sizes (drop later samples if smaller); sim: full sim size")
-    ap.add_argument("--workers", type=int, default=4)
-    ap.add_argument("--sim-dir", type=Path); ap.add_argument("--h5", type=Path, dest="h5_path")
-    ap.add_argument("--out-dir", type=Path)
-    a = ap.parse_args()
-    for k in ("sim_dir", "h5_path", "out_dir"):
-        v = getattr(a, k, None)
-        if v is not None:
-            CFG[k] = v
 
-    pops = [p for p in a.pops.split(",") if p]
-    bad = [p for p in pops if p not in PANEL_SAMPLES]
-    if bad:
-        sys.exit(f"unknown pop(s) {bad}; known: {list(PANEL_SAMPLES)}")
-    sims = list(range(a.n_sims))
-    chrom_order = sorted(parse_chroms(a.chroms))
-    CFG["out_dir"].mkdir(parents=True, exist_ok=True)
-    print(f"pops={pops} sims=first {a.n_sims} chroms={chrom_order} size={a.size} workers={a.workers}")
-    print(f"sim_dir={CFG['sim_dir']}  h5={CFG['h5_path']}  out={CFG['out_dir']}")
+def make_display_axis(layout: GenomeLayout) -> tuple[np.ndarray, np.ndarray, int]:
+    n_bins = min(MAX_DISPLAY_BINS, layout.n_windows)
+    low = float(layout.genome_midpoints.min())
+    high = float(layout.genome_midpoints.max())
+    span = high - low
+    if span == 0:
+        return np.zeros(layout.n_windows, dtype=int), np.asarray([low]), 1
+    indices = np.clip(((layout.genome_midpoints - low) / span * n_bins).astype(int), 0, n_bins - 1)
+    centers = (np.arange(n_bins) + 0.5) / n_bins * span + low
+    return indices, centers, n_bins
 
-    # sample-size reconciliation up front (panel vs simulated; equal for v8 -> no shortfall)
-    print("  sample sizes (diploid) — panel target vs simulated:")
-    for p in pops:
-        pn, sm = PANEL_SAMPLES[p], SIM_SAMPLES[p]
-        note = "ok (drop %d)" % (sm - pn) if sm >= pn else "SHORTFALL: panel exceeds sim by %d (using all %d)" % (pn - sm, sm)
-        print(f"    {p}: panel={pn} sim={sm} -> {note}")
 
-    chrom_order, meta, genome_mid, n_win_genome, boundaries, labels, target = \
-        load_genome_axis(chrom_order, pops)
-    if n_win_genome == 0:
-        sys.exit("no chromosomes found in h5 for the requested --chroms")
-    # display binning: up to ~2500 genome bins, but never more than we have windows
-    # (else sparse data scatters into mostly-empty bins and the lines break on nan)
-    n_bins = int(min(2500, max(1, n_win_genome)))
-    lo, hi = genome_mid.min(), genome_mid.max()
-    idx = np.clip(((genome_mid - lo) / (hi - lo + 1e-9) * n_bins).astype(int), 0, n_bins - 1)
-    centers = (np.arange(n_bins) + 0.5) / n_bins * (hi - lo) + lo
+def new_accumulator(target: np.ndarray, indices: np.ndarray, n_bins: int) -> PopulationAccumulator:
+    names = ("segregating", "tajimas_d", "diversity", "target")
+    return PopulationAccumulator(
+        target=target,
+        binned_sum={name: np.zeros(n_bins) for name in names},
+        binned_count={name: np.zeros(n_bins, dtype=np.int64) for name in names},
+        traces={name: [] for name in names if name != "target"},
+        distribution_values=[],
+        afs=None,
+        sum_stat={name: 0.0 for name in names},
+        count_stat={name: 0 for name in names},
+        used_haplotypes=[],
+        available_haplotypes=[],
+    )
 
-    # run the per-unit analysis in parallel
-    jobs = [(p, s, c, a.size) for p in pops for s in sims for c in chrom_order]
-    print(f"  {len(jobs)} (pop,sim,chrom) units to analyze", flush=True)
-    results = {}; t0 = time.time(); done = 0; miss = err = 0
-    with ProcessPoolExecutor(max_workers=a.workers) as ex:
-        futs = {ex.submit(analyze_unit, j): j for j in jobs}
-        for fut in as_completed(futs):
-            r = fut.result(); done += 1
-            results[(r["pop"], r["sim"], r["chrom"])] = r
-            if r["status"] == "missing":
-                miss += 1; print(f"  [{done}/{len(jobs)}] MISSING {r['msg']}", flush=True)
-            elif r["status"] == "error":
-                err += 1; print(f"  [{done}/{len(jobs)}] ERROR ({r['pop']},{r['sim']},{r['chrom']}): {r['msg']}", flush=True)
-            elif done % 25 == 0 or done == len(jobs):
-                print(f"  … {done}/{len(jobs)} analyzed in {time.time()-t0:.0f}s", flush=True)
 
-    # assemble genome-wide arrays per pop and plot
-    rows = []; Dpool = {}
-    for pop in pops:
-        Sg = np.full((len(sims), n_win_genome), np.nan)
-        Dg = np.full_like(Sg, np.nan); Pg = np.full_like(Sg, np.nan)
-        afs_pop = None; n_used = n_avail = want = 0
-        for si, sim in enumerate(sims):
-            for c in chrom_order:
-                r = results.get((pop, sim, c))
-                if not r or r["status"] != "ok":
+def add_statistic(
+    accumulator: PopulationAccumulator,
+    name: str,
+    values: np.ndarray,
+    indices: np.ndarray,
+    n_bins: int,
+    keep_trace: bool,
+) -> np.ndarray:
+    valid = np.isfinite(values)
+    accumulator.sum_stat[name] += float(np.sum(values[valid], dtype=np.float64))
+    accumulator.count_stat[name] += int(valid.sum())
+    binned = bin_mean(indices, values, n_bins)
+    add_binned(accumulator, name, binned)
+    if keep_trace:
+        accumulator.traces[name].append(binned)
+    return valid
+
+
+def parse_populations(spec: str | None, embedded: list[str]) -> list[str]:
+    if spec is None:
+        return embedded
+    populations = [value.strip().upper() for value in spec.split(",") if value.strip()]
+    if not populations:
+        raise ValueError("--pops selected no populations")
+    unknown = [population for population in populations if population not in embedded]
+    if unknown or len(set(populations)) != len(populations):
+        raise ValueError(f"invalid, duplicate, or absent populations: {unknown or populations}")
+    return populations
+
+
+def parser() -> argparse.ArgumentParser:
+    result = argparse.ArgumentParser(description=__doc__)
+    result.add_argument("--n-sims", type=int, default=5, help="Analyze sim_00000 through N-1")
+    result.add_argument("--pops", help="Comma-separated populations; default: all in map")
+    result.add_argument("--chroms", default="1-22")
+    result.add_argument(
+        "--size",
+        choices=("panel", "sim"),
+        default="panel",
+        help="panel: map's embedded sample count; sim: all samples in each tree sequence",
+    )
+    result.add_argument("--workers", type=int, default=4)
+    result.add_argument("--max-pending", type=int, default=0, help="Default: twice --workers")
+    result.add_argument(
+        "--max-traces",
+        type=int,
+        default=50,
+        help="Maximum individual simulation traces per population (means still use every sim)",
+    )
+    result.add_argument("--sim-dir", type=Path, default=DEFAULT_SIM_DIR)
+    result.add_argument("--h5", "--map", dest="map_path", type=Path, default=DEFAULT_MAP)
+    result.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR)
+    return result
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parser().parse_args(argv)
+    if args.n_sims <= 0 or args.workers <= 0 or args.max_traces < 0:
+        raise SystemExit(
+            "--n-sims and --workers must be positive; --max-traces must be nonnegative"
+        )
+    max_pending = args.max_pending or 2 * args.workers
+    if max_pending < args.workers:
+        raise SystemExit("--max-pending must be zero or at least --workers")
+
+    map_path = args.map_path.expanduser().resolve()
+    sim_dir = args.sim_dir.expanduser().resolve()
+    out_dir = args.out_dir.expanduser().resolve()
+    if not map_path.is_file():
+        raise SystemExit(f"map does not exist: {map_path}; run generate_map.py first")
+    map_sha256 = sha256_file(map_path)
+    try:
+        window_size, embedded_populations, sample_counts = read_map_header(map_path)
+        populations = parse_populations(args.pops, embedded_populations)
+        chromosomes = parse_chroms(args.chroms)
+        layout = load_genome_layout(map_path, chromosomes, populations, sample_counts)
+    except (KeyError, OSError, ValueError) as error:
+        raise SystemExit(f"invalid map or selection: {error}") from error
+    out_dir.mkdir(parents=True, exist_ok=True)
+    indices, centers, n_bins = make_display_axis(layout)
+    worker_edges = {
+        chromosome: chromosome_layout.edges
+        for chromosome, chromosome_layout in layout.chromosome_layouts.items()
+    }
+    total_units = args.n_sims * len(populations) * len(chromosomes)
+    panel_summary = ", ".join(f"{pop}: {sample_counts[pop]}" for pop in populations)
+    print(
+        f"map={map_path} sha256={map_sha256} window={format_window_size(window_size)}\n"
+        f"pops={populations} panel_samples={{{panel_summary}}}\n"
+        f"chroms={chromosomes} sims=first {args.n_sims} size={args.size}\n"
+        f"units={total_units:,} workers={args.workers} max_pending={max_pending}\n"
+        f"sim_dir={sim_dir} out={out_dir}",
+        flush=True,
+    )
+
+    rows: list[dict[str, object]] = []
+    distributions: dict[str, np.ndarray] = {}
+    completed_units = missing_units = error_units = 0
+    started = time.monotonic()
+    executor = ProcessPoolExecutor(
+        max_workers=args.workers,
+        initializer=init_worker,
+        initargs=(str(sim_dir), worker_edges, sample_counts, map_sha256),
+    )
+    try:
+        for population in populations:
+            accumulator = new_accumulator(layout.targets[population], indices, n_bins)
+            distribution_cap_per_sim = max(
+                1, (MAX_DISTRIBUTION_VALUES + args.n_sims - 1) // args.n_sims
+            )
+            for simulation in range(args.n_sims):
+                arrays = {
+                    name: np.full(layout.n_windows, np.nan, dtype=np.float32)
+                    for name in ("segregating", "tajimas_d", "diversity")
+                }
+                successful_windows = np.zeros(layout.n_windows, dtype=bool)
+                units_this_sim = 0
+                jobs = (
+                    (population, simulation, chromosome, args.size) for chromosome in chromosomes
+                )
+                for result in bounded_results(executor, jobs, max_pending):
+                    completed_units += 1
+                    status = str(result["status"])
+                    chromosome = str(result["chromosome"])
+                    if status == "missing":
+                        missing_units += 1
+                        print(
+                            f"[{completed_units}/{total_units}] MISSING {result['message']}",
+                            flush=True,
+                        )
+                        continue
+                    if status == "error":
+                        error_units += 1
+                        print(
+                            f"[{completed_units}/{total_units}] ERROR "
+                            f"{population}/sim_{simulation:05d}/{chromosome}: "
+                            f"{result['message']}",
+                            flush=True,
+                        )
+                        continue
+                    output_slice = layout.chromosome_layouts[chromosome].output_slice
+                    expected = output_slice.stop - output_slice.start
+                    for name in arrays:
+                        values = np.asarray(result[name])
+                        if len(values) != expected:
+                            raise RuntimeError(
+                                f"worker returned {len(values)} {name} windows for "
+                                f"{chromosome}; expected {expected}"
+                            )
+                        arrays[name][output_slice] = values
+                    successful_windows[output_slice] = True
+                    accumulator.used_haplotypes.append(int(result["used"]))
+                    accumulator.available_haplotypes.append(int(result["available"]))
+                    accumulator.units_ok += 1
+                    units_this_sim += 1
+                    afs = np.asarray(result["afs"], dtype=np.float64)
+                    if accumulator.afs is None:
+                        accumulator.afs = np.zeros_like(afs)
+                    if accumulator.afs.shape == afs.shape:
+                        accumulator.afs += afs
+                    else:
+                        print(
+                            f"[warn] {population}/sim_{simulation:05d}/{chromosome}: "
+                            "SFS sample size differs; excluding this unit from the SFS",
+                            flush=True,
+                        )
+                    if completed_units % 25 == 0 or completed_units == total_units:
+                        print(
+                            f"... {completed_units}/{total_units} analyzed in "
+                            f"{time.monotonic() - started:.0f}s",
+                            flush=True,
+                        )
+                if units_this_sim == 0:
                     continue
-                sl = meta[c]["slice"]
-                Sg[si, sl] = r["S"]; Dg[si, sl] = r["D"]; Pg[si, sl] = r["pi"]
-                n_used, n_avail, want = r["n_used"], r["n_avail"], r["want"]
-                if afs_pop is None:
-                    afs_pop = np.zeros_like(r["afs"])
-                if r["afs"].shape == afs_pop.shape:
-                    afs_pop += r["afs"]
-        if n_used == 0:
-            print(f"  [warn] {pop}: no usable units, skipping plots", flush=True)
-            continue
-        p1 = plot_pop_genomewide(pop, idx, centers, boundaries, labels, Sg, Dg, Pg,
-                                 target[pop], n_used, n_avail, want, CFG["out_dir"], a.size)
-        p2 = plot_pop_sfs(pop, afs_pop, n_used, CFG["out_dir"])
-        Dpool[pop] = Dg[np.isfinite(Dg)]
-        rows.append(dict(pop=pop, n_used_hap=n_used, n_used_dip=n_used // 2,
-                         panel_dip=PANEL_SAMPLES[pop], sim_dip=SIM_SAMPLES[pop],
-                         shortfall_dip=max(0, PANEL_SAMPLES[pop] - SIM_SAMPLES[pop]),
-                         mean_S_realized=float(np.nanmean(Sg)),
-                         mean_theta_target=float(np.nanmean(target[pop])),
-                         mean_TajD=float(np.nanmean(Dg)), mean_pi=float(np.nanmean(Pg))))
-        print(f"  [{pop}] wrote {p1.name}" + (f", {p2.name}" if p2 else ""), flush=True)
+                accumulator.sims_with_data += 1
+                keep_trace = len(accumulator.traces["segregating"]) < args.max_traces
+                for name, values in arrays.items():
+                    valid = add_statistic(accumulator, name, values, indices, n_bins, keep_trace)
+                    if name == "tajimas_d":
+                        finite_values = values[valid]
+                        remaining = MAX_DISTRIBUTION_VALUES - accumulator.distribution_count
+                        retain = min(distribution_cap_per_sim, remaining)
+                        if retain <= 0:
+                            continue
+                        if len(finite_values) > retain:
+                            chosen = np.linspace(
+                                0,
+                                len(finite_values) - 1,
+                                retain,
+                                dtype=int,
+                            )
+                            finite_values = finite_values[chosen]
+                        if len(finite_values):
+                            accumulator.distribution_values.append(finite_values.copy())
+                            accumulator.distribution_count += len(finite_values)
+                matched_target = np.where(successful_windows, accumulator.target, np.nan)
+                add_statistic(
+                    accumulator,
+                    "target",
+                    matched_target,
+                    indices,
+                    n_bins,
+                    keep_trace=False,
+                )
 
-    if rows:
-        ps = plot_summary(rows, Dpool, CFG["out_dir"])
-        tsv = CFG["out_dir"] / "summary.tsv"
-        cols = ["pop", "n_used_hap", "n_used_dip", "panel_dip", "sim_dip", "shortfall_dip",
-                "mean_S_realized", "mean_theta_target", "mean_TajD", "mean_pi"]
-        with open(tsv, "w") as fh:
-            fh.write("\t".join(cols) + "\n")
-            for r in rows:
-                fh.write("\t".join(f"{r[c]:.4g}" if isinstance(r[c], float) else str(r[c])
-                                   for c in cols) + "\n")
-        print(f"\nDONE in {time.time()-t0:.0f}s. wrote {ps.name}, summary.tsv, and per-pop PNGs "
-              f"to {CFG['out_dir']}  (missing={miss} error={err})")
-        shortfalls = [r["pop"] for r in rows if r["shortfall_dip"] > 0]
-        if a.size == "panel" and shortfalls:
-            print(f"  ⚠ panel sample size exceeds the simulated size for: {', '.join(shortfalls)} "
-                  f"— plots for these use ALL simulated samples (see summary.tsv shortfall_dip).")
-    else:
-        print("\nno pops produced plots (all units missing?) — check --sim-dir")
+            if accumulator.units_ok == 0:
+                print(f"[warn] {population}: no usable units; skipping plots", flush=True)
+                continue
+            genome_plot = plot_population_genomewide(
+                population,
+                accumulator,
+                centers,
+                layout,
+                sample_counts[population],
+                out_dir,
+                args.size,
+            )
+            sfs_plot = plot_population_sfs(
+                population, accumulator.afs, accumulator.used_haplotypes, out_dir
+            )
+            distributions[population] = (
+                np.concatenate(accumulator.distribution_values)
+                if accumulator.distribution_values
+                else np.empty(0)
+            )
+            used_min = min(accumulator.used_haplotypes)
+            used_max = max(accumulator.used_haplotypes)
+            available_min = min(accumulator.available_haplotypes)
+            available_max = max(accumulator.available_haplotypes)
+            panel_haplotypes = 2 * sample_counts[population]
+            rows.append(
+                {
+                    "pop": population,
+                    "n_used_hap": used_min,
+                    "n_used_dip": used_min // 2,
+                    "panel_dip": sample_counts[population],
+                    "sim_dip": available_min // 2,
+                    "shortfall_dip": max(0, panel_haplotypes - available_min) // 2,
+                    "mean_S_realized": statistic_mean(accumulator, "segregating"),
+                    "mean_theta_target": statistic_mean(accumulator, "target"),
+                    "mean_TajD": statistic_mean(accumulator, "tajimas_d"),
+                    "mean_pi": statistic_mean(accumulator, "diversity"),
+                    "window_size": window_size,
+                    "n_sims_requested": args.n_sims,
+                    "n_sims_analyzed": accumulator.sims_with_data,
+                    "n_units_analyzed": accumulator.units_ok,
+                    "n_used_hap_max": used_max,
+                    "sim_dip_max": available_max // 2,
+                }
+            )
+            names = [genome_plot.name]
+            if sfs_plot is not None:
+                names.append(sfs_plot.name)
+            print(f"[{population}] wrote {', '.join(names)}", flush=True)
+    finally:
+        executor.shutdown(wait=True, cancel_futures=True)
+
+    if not rows:
+        print("No populations produced plots; check --sim-dir and requested simulations.")
+        return 1
+    summary_plot = plot_summary(rows, distributions, window_size, out_dir)
+    summary_path = out_dir / "summary.tsv"
+    columns = [
+        "pop",
+        "n_used_hap",
+        "n_used_dip",
+        "panel_dip",
+        "sim_dip",
+        "shortfall_dip",
+        "mean_S_realized",
+        "mean_theta_target",
+        "mean_TajD",
+        "mean_pi",
+        "window_size",
+        "n_sims_requested",
+        "n_sims_analyzed",
+        "n_units_analyzed",
+        "n_used_hap_max",
+        "sim_dip_max",
+    ]
+    with summary_path.open("w", encoding="utf-8", newline="") as handle:
+        handle.write("\t".join(columns) + "\n")
+        for row in rows:
+            handle.write(
+                "\t".join(
+                    f"{row[column]:.6g}" if isinstance(row[column], float) else str(row[column])
+                    for column in columns
+                )
+                + "\n"
+            )
+    print(
+        f"DONE in {time.monotonic() - started:.0f}s. Wrote {summary_plot.name}, "
+        f"{summary_path.name}, and per-population PNGs to {out_dir} "
+        f"(missing={missing_units}, errors={error_units}).",
+        flush=True,
+    )
+    return 0 if error_units == 0 else 1
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
