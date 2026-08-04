@@ -48,7 +48,7 @@ DEFAULT_RELATED = (
     "relatedness/relatedness_flagged_samples.tsv"
 )
 DEFAULT_HARDMASK = "gs://rw-migration-aou-rw-fa99430f/hardmask.hg38.v4.over99.bed"
-DEFAULT_SAMPLES_PER_POPULATION = 224
+DEFAULT_SAMPLES_PER_POPULATION = 0
 DEFAULT_SAMPLE_SELECTION_SEED = 42
 SAMPLE_SELECTION_ALGORITHM = "sha256-rank-v1"
 COUNTER_VERSION = "group-source-coordinates-before-snv-filter/v4-call-rate"
@@ -64,6 +64,14 @@ def sha256_file(path: Path, chunk_size: int = 8 << 20) -> str:
         while chunk := handle.read(chunk_size):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def watterson_a_n(diploid_samples: int) -> float:
+    """Return a_n for the expected 2N sampled haplotypes."""
+    if diploid_samples <= 0:
+        raise ValueError("diploid sample count must be positive")
+    haplotypes = 2 * diploid_samples
+    return math.fsum(1.0 / index for index in range(1, haplotypes))
 
 
 def atomic_text(path: Path, text: str) -> None:
@@ -1067,6 +1075,7 @@ def write_hdf5(
     chromosome_stats: dict[str, dict[str, object]] = {}
     expected_an = {pop: 2 * len(samples[pop]) for pop in populations}
     minimum_an = {pop: math.ceil(expected_an[pop] * args.min_call_rate) for pop in populations}
+    watterson_denominators = {pop: watterson_a_n(len(samples[pop])) for pop in populations}
     try:
         with h5py.File(temporary, "w") as handle:
             handle.attrs.update(
@@ -1077,10 +1086,17 @@ def write_hdf5(
                     "window_size": args.window_size,
                     "coordinate_system": "0-based half-open windows; BCF POS converted with %POS0",
                     "theta_definition": (
-                        "number of distinct unmasked biallelic SNV positions with 0 < AC < AN "
-                        "and AN >= ceil(2 * diploid sample count * min_call_rate) within the "
-                        "named population"
+                        "backward-compatible dataset name storing raw S: the number of distinct "
+                        "unmasked biallelic SNV positions with 0 < AC < AN and "
+                        "AN >= ceil(2 * diploid sample count * min_call_rate) within the named "
+                        "population; no a_n normalization is applied"
                     ),
+                    "stored_statistic": "S (raw biallelic segregating-SNV count per window)",
+                    "watterson_theta_definition": (
+                        "theta_W = S / a_n, where a_n = sum(1/i, i=1..2N-1); not applied to "
+                        "stored values and approximate when counted sites have missing genotypes"
+                    ),
+                    "watterson_a_n_json": json.dumps(watterson_denominators, sort_keys=True),
                     "min_call_rate": float(args.min_call_rate),
                     "callability_policy": (
                         "population AN must meet the recorded minimum_an; 0.0 preserves the "
@@ -1168,6 +1184,10 @@ def write_hdf5(
                         dataset.attrs["expected_an"] = expected_an[pop]
                         dataset.attrs["minimum_an"] = minimum_an[pop]
                         dataset.attrs["min_call_rate"] = float(args.min_call_rate)
+                        dataset.attrs["stored_statistic"] = "S"
+                        dataset.attrs["normalization_applied"] = "none"
+                        dataset.attrs["watterson_a_n"] = watterson_denominators[pop]
+                        dataset.attrs["watterson_theta_formula"] = "theta_W = S / a_n"
                         dataset.attrs["segregating_positions_excluded_low_an"] = int(
                             qc["segregating_positions_excluded_low_an"][pop]
                         )
@@ -1202,6 +1222,10 @@ def write_hdf5(
         },
         "selection": selection_stats,
         "input_provenance": input_provenance or {},
+        "stored_statistic": "S_raw_biallelic_segregating_snv_count",
+        "watterson_a_n": watterson_denominators,
+        "watterson_theta_formula": "theta_W = S / a_n",
+        "segregating_site_totals": totals,
         "theta_totals": totals,
         "chromosomes": chromosome_stats,
     }

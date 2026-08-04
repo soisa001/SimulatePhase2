@@ -135,8 +135,15 @@ def test_population_subsample_rejects_insufficient_population() -> None:
 
 def test_population_subsample_cli_defaults() -> None:
     args = generate_map.parser().parse_args([])
-    assert args.samples_per_population == 224
+    assert args.samples_per_population == 0
     assert args.sample_selection_seed == 42
+
+
+def test_watterson_a_n_uses_expected_haploid_count() -> None:
+    assert generate_map.watterson_a_n(1) == pytest.approx(1.0)
+    assert generate_map.watterson_a_n(2) == pytest.approx(1.0 + 1.0 / 2.0 + 1.0 / 3.0)
+    with pytest.raises(ValueError, match="positive"):
+        generate_map.watterson_a_n(0)
 
 
 def test_aou_tsv_header_wins_over_comma_arrays(tmp_path: Path) -> None:
@@ -482,6 +489,11 @@ def test_compact_hdf5_round_trip(tmp_path: Path) -> None:
         selection_stats={"retained": 3},
     )
     assert summary["theta_totals"] == {"AFR": 4, "EUR": 4}
+    assert summary["segregating_site_totals"] == {"AFR": 4, "EUR": 4}
+    assert summary["stored_statistic"] == "S_raw_biallelic_segregating_snv_count"
+    assert summary["watterson_a_n"] == pytest.approx(
+        {"AFR": 1.0 + 1.0 / 2.0 + 1.0 / 3.0, "EUR": 1.0}
+    )
     assert summary["callability_policy"]["minimum_an"] == {"AFR": 2, "EUR": 1}
     with h5py.File(output, "r") as handle:
         assert handle.attrs["schema"] == SCHEMA
@@ -490,6 +502,9 @@ def test_compact_hdf5_round_trip(tmp_path: Path) -> None:
         assert dataset.dtype == np.dtype("uint16")
         assert dataset.compression == "gzip"
         assert dataset.fletcher32
+        assert dataset.attrs["stored_statistic"] == "S"
+        assert dataset.attrs["normalization_applied"] == "none"
+        assert dataset.attrs["watterson_a_n"] == pytest.approx(1.0 + 1.0 / 2.0 + 1.0 / 3.0)
         assert dataset.attrs["minimum_an"] == 2
         assert dataset.attrs["segregating_positions_excluded_low_an"] == 3
         assert json.loads(handle["chr1"].attrs["qc_json"])[

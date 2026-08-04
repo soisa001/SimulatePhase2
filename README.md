@@ -3,15 +3,20 @@
 This repository has two separate, explicit stages:
 
 1. `generate_map.py` measures the empirical number of segregating biallelic
-   SNV positions (`theta`) in each 10 kb window and population.
+   SNV positions (`S`, retained under the legacy dataset name `theta`) in each
+   10 kb window and population.
 2. `run_sim.py` simulates ancestry, generates an excess of candidate
    mutations, and retains exactly the empirical number of unmasked,
    biallelic, segregating sites in every window.
 
-`theta` is therefore a **sample-count- and callability-specific target count**,
-not conventional population-genetic theta and not an inferred per-base mutation
-probability. The mutation probabilities passed to msprime are proposal rates
-used only to create enough candidate sites.
+The stored value is therefore the **raw, sample-count- and callability-specific
+segregating-site count `S`**, not conventional population-genetic theta and not
+an inferred per-base mutation probability. No normalization is applied. The
+HDF5 records each population's `a_n = sum(1/i, i=1..2N-1)`, allowing a later
+Watterson-style estimate `theta_W = S/a_n` or approximate sample-size rescaling
+`S_target = S_full * a_n,target/a_n,full`. The latter is approximate when sites
+have missing genotypes. Mutation probabilities passed to msprime are proposal
+rates used only to create enough candidate sites.
 
 ## Installation
 
@@ -45,19 +50,20 @@ The production defaults are:
 - minimum per-population genotype call rate: `0.0` (literal any-called
   segregating-site count)
 - window size: 10,000 bp
-- retained samples: 224 QC-gated diploid samples per population
-- sample-selection seed: 42, using stable SHA256 ranking
+- retained samples: every QC-gated diploid sample available in each population
+- optional capped-sample seed: 42, using stable SHA256 ranking
 - four chromosome jobs, with two bcftools threads per job
 
 The first BCF header supplies the ordered starting panel. Samples missing from
 the ancestry table, labelled OTH, jointly flagged, or related are excluded.
-From the remaining samples, the default build selects exactly 224 diploids per
-population using a deterministic SHA256 rank and then restores their BCF panel
-order. Every selected ID must occur in every requested BCF. The selected IDs
-are persisted in `mutation_map_work/sample_manifest.tsv` and embedded in the
-HDF5. Use `--samples-per-population 0` for the complete QC-gated panel, or
-supply an already gated `sample_id<TAB>population` manifest with
-`--sample-manifest`; an explicit manifest is used exactly and is not capped.
+Every remaining sample is retained by default, in BCF panel order, and must
+occur in every requested BCF. The exact IDs are persisted in
+`mutation_map_work/sample_manifest.tsv` and embedded in the HDF5. To build an
+explicit sensitivity map with a fixed cap, use for example
+`--samples-per-population 224`; capped selection uses deterministic SHA256 rank
+with seed 42 and then restores BCF panel order. An already gated
+`sample_id<TAB>population` file supplied with `--sample-manifest` is used exactly
+and is never capped.
 
 By default, a population contributes a site whenever `0 < AC < AN`, even if
 some selected genotypes are missing. To require a called-allele fraction, add
@@ -136,8 +142,8 @@ Simulation defaults are:
 
 - 1,000 simulations per population
 - four process workers, with at most eight submitted tasks in memory
-- population sample counts read from the map (224 diploids per population for
-  a map generated with defaults)
+- population sample counts read from the map (the full, population-specific
+  QC-gated counts for a map generated with defaults)
 - recombination rate `1e-8` per bp per generation
 - initial candidate mutation rate `5e-8`
 - retry candidate mutation rate `1e-7`, restricted to deficient windows
@@ -157,13 +163,11 @@ is biallelic and segregating and that the complete per-window vector equals
 the empirical `theta` vector. Exhausted retries are errors and never produce a
 completed artifact.
 
-With the default 224 diploids, each simulated population has 448 haplotypes and
-`C(448, 2) = 100,128` unordered haplotype pairs. This makes exhaustive
-Gamma-SMC pairing practical. If within-individual haplotype pairs are removed,
-99,904 pairs remain. For a matched simulation p-value, run the observed scan on
-the same persisted 224-person manifest and use the same exhaustive pairing rule
-in observed and simulated data; 100,128 pair values are correlated comparisons,
-not independent replicates.
+`run_sim.py` currently simulates the exact diploid count embedded in the map.
+Consequently, a default full-panel map requests full-panel simulations, which
+can be substantially more expensive than 224-diploid simulations. The map keeps
+raw `S` plus `a_n` so a later workflow can explicitly rescale counts before a
+smaller simulation; no implicit rescaling occurs in the current runner.
 
 Exact thinning intentionally conditions each simulated window on the observed
 segregating-site count. This preserves the candidate mutations' conditional
