@@ -45,13 +45,19 @@ The production defaults are:
 - minimum per-population genotype call rate: `0.0` (literal any-called
   segregating-site count)
 - window size: 10,000 bp
+- retained samples: 224 QC-gated diploid samples per population
+- sample-selection seed: 42, using stable SHA256 ranking
 - four chromosome jobs, with two bcftools threads per job
 
 The first BCF header supplies the ordered starting panel. Samples missing from
 the ancestry table, labelled OTH, jointly flagged, or related are excluded.
-Every selected ID must occur in every requested BCF. An already gated
-`sample_id<TAB>population` manifest can instead be supplied with
-`--sample-manifest`.
+From the remaining samples, the default build selects exactly 224 diploids per
+population using a deterministic SHA256 rank and then restores their BCF panel
+order. Every selected ID must occur in every requested BCF. The selected IDs
+are persisted in `mutation_map_work/sample_manifest.tsv` and embedded in the
+HDF5. Use `--samples-per-population 0` for the complete QC-gated panel, or
+supply an already gated `sample_id<TAB>population` manifest with
+`--sample-manifest`; an explicit manifest is used exactly and is not capped.
 
 By default, a population contributes a site whenever `0 < AC < AN`, even if
 some selected genotypes are missing. To require a called-allele fraction, add
@@ -130,7 +136,8 @@ Simulation defaults are:
 
 - 1,000 simulations per population
 - four process workers, with at most eight submitted tasks in memory
-- population sample counts read from the map
+- population sample counts read from the map (224 diploids per population for
+  a map generated with defaults)
 - recombination rate `1e-8` per bp per generation
 - initial candidate mutation rate `5e-8`
 - retry candidate mutation rate `1e-7`, restricted to deficient windows
@@ -149,6 +156,14 @@ atomically. Before publication, tskit independently verifies that every site
 is biallelic and segregating and that the complete per-window vector equals
 the empirical `theta` vector. Exhausted retries are errors and never produce a
 completed artifact.
+
+With the default 224 diploids, each simulated population has 448 haplotypes and
+`C(448, 2) = 100,128` unordered haplotype pairs. This makes exhaustive
+Gamma-SMC pairing practical. If within-individual haplotype pairs are removed,
+99,904 pairs remain. For a matched simulation p-value, run the observed scan on
+the same persisted 224-person manifest and use the same exhaustive pairing rule
+in observed and simulated data; 100,128 pair values are correlated comparisons,
+not independent replicates.
 
 Exact thinning intentionally conditions each simulated window on the observed
 segregating-site count. This preserves the candidate mutations' conditional

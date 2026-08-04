@@ -48,6 +48,9 @@ DEFAULT_RELATED = (
     "relatedness/relatedness_flagged_samples.tsv"
 )
 DEFAULT_HARDMASK = "gs://rw-migration-aou-rw-fa99430f/hardmask.hg38.v4.over99.bed"
+DEFAULT_SAMPLES_PER_POPULATION = 224
+DEFAULT_SAMPLE_SELECTION_SEED = 42
+SAMPLE_SELECTION_ALGORITHM = "sha256-rank-v1"
 COUNTER_VERSION = "group-source-coordinates-before-snv-filter/v4-call-rate"
 
 
@@ -392,6 +395,60 @@ def build_gated_panel(
         "retained": sum(map(len, result.values())),
     }
     return result, stats
+
+
+def select_population_samples(
+    samples: dict[str, list[str]],
+    samples_per_population: int,
+    seed: int,
+) -> tuple[dict[str, list[str]], dict[str, int]]:
+    """Select a stable pseudo-random subset while preserving panel order.
+
+    SHA256 ranking avoids Python- or NumPy-RNG version dependence. Population
+    and sample ID are both part of the rank, so selecting a population alone
+    gives the same IDs as selecting it alongside the other populations.
+    ``samples_per_population=0`` retains every gated sample.
+    """
+    if samples_per_population < 0:
+        raise ValueError("samples per population must be nonnegative")
+    if seed < 0:
+        raise ValueError("sample-selection seed must be nonnegative")
+
+    eligible = {population: len(ids) for population, ids in samples.items()}
+    if samples_per_population == 0:
+        selected = {population: list(ids) for population, ids in samples.items()}
+    else:
+        insufficient = {
+            population: count
+            for population, count in eligible.items()
+            if count < samples_per_population
+        }
+        if insufficient:
+            detail = ", ".join(
+                f"{population}={count:,}" for population, count in insufficient.items()
+            )
+            raise ValueError(f"fewer than {samples_per_population:,} QC-gated samples: {detail}")
+        selected = {}
+        for population, ids in samples.items():
+            ranked = sorted(
+                ids,
+                key=lambda sample: hashlib.sha256(
+                    (f"{SAMPLE_SELECTION_ALGORITHM}\0{seed}\0{population}\0{sample}").encode()
+                ).digest(),
+            )
+            keep = set(ranked[:samples_per_population])
+            selected[population] = [sample for sample in ids if sample in keep]
+
+    retained = sum(map(len, selected.values()))
+    stats = {
+        "retained_after_qc": sum(eligible.values()),
+        "removed_by_population_subsample": sum(eligible.values()) - retained,
+        "samples_per_population": samples_per_population,
+        "sample_selection_seed": seed,
+        "retained": retained,
+    }
+    stats.update({f"eligible_{population}": count for population, count in eligible.items()})
+    return selected, stats
 
 
 CONTIG_RE = re.compile(r"^##contig=<(.+)>$")
@@ -1167,6 +1224,26 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--population", dest="populations", action="append")
     result.add_argument("--sample-manifest", type=Path)
     result.add_argument(
+        "--samples-per-population",
+        "--samples-per-pop",
+        type=int,
+        default=DEFAULT_SAMPLES_PER_POPULATION,
+        help=(
+            "Deterministically select this many QC-gated diploids per population "
+            f"[{DEFAULT_SAMPLES_PER_POPULATION}]; 0 retains the full gated panel. "
+            "Ignored when --sample-manifest supplies the exact samples."
+        ),
+    )
+    result.add_argument(
+        "--sample-selection-seed",
+        type=int,
+        default=DEFAULT_SAMPLE_SELECTION_SEED,
+        help=(
+            "Seed for stable SHA256-ranked population subsampling "
+            f"[{DEFAULT_SAMPLE_SELECTION_SEED}]"
+        ),
+    )
+    result.add_argument(
         "--panel-samples", help="Optional ordered one-column panel; default is first BCF header"
     )
     result.add_argument("--ancestry-table", default=DEFAULT_ANCESTRY)
@@ -1216,6 +1293,10 @@ def _run(args: argparse.Namespace) -> int:
         raise SystemExit("--window-size, --jobs, and --threads must be positive")
     if not 0.0 <= args.min_call_rate <= 1.0:
         raise SystemExit("--min-call-rate must be between 0 and 1")
+    if args.samples_per_population < 0:
+        raise SystemExit("--samples-per-population must be nonnegative")
+    if args.sample_selection_seed < 0:
+        raise SystemExit("--sample-selection-seed must be nonnegative")
     if args.no_mask:
         args.hardmask = None
     for executable in (args.bcftools, args.awk):
@@ -1317,6 +1398,10 @@ def _run(args: argparse.Namespace) -> int:
         selection_stats = {
             "manifest_rows_retained": sum(map(len, samples.values())),
             "manifest_is_trusted_as_pre_gated": 1,
+            "retained": sum(map(len, samples.values())),
+        }
+        input_provenance["population_subsample"] = {
+            "mode": "explicit sample manifest; no automatic subsampling"
         }
     else:
         if args.panel_samples:
@@ -1341,6 +1426,25 @@ def _run(args: argparse.Namespace) -> int:
             ancestry_column=args.ancestry_column,
             ancestry_id_column=args.ancestry_id_column,
         )
+        try:
+            samples, subset_stats = select_population_samples(
+                samples,
+                args.samples_per_population,
+                args.sample_selection_seed,
+            )
+        except ValueError as error:
+            raise SystemExit(str(error)) from error
+        selection_stats.update(subset_stats)
+        input_provenance["population_subsample"] = {
+            "mode": (
+                "all QC-gated samples"
+                if args.samples_per_population == 0
+                else "deterministic pseudo-random population subset"
+            ),
+            "algorithm": SAMPLE_SELECTION_ALGORITHM,
+            "seed": args.sample_selection_seed,
+            "samples_per_population": args.samples_per_population,
+        }
     empty = [pop for pop in populations if not samples.get(pop)]
     if empty:
         raise SystemExit(f"no retained samples for populations: {empty}")

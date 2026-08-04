@@ -95,6 +95,50 @@ def test_ancestry_qc_and_relatedness_gating(tmp_path: Path) -> None:
     assert stats["related"] == 1
 
 
+def test_population_subsample_is_stable_order_preserving_and_population_local() -> None:
+    samples = {
+        "AFR": [f"afr-{index:03d}" for index in range(300)],
+        "EUR": [f"eur-{index:03d}" for index in range(280)],
+    }
+    selected, stats = generate_map.select_population_samples(samples, 224, 42)
+    assert {population: len(ids) for population, ids in selected.items()} == {
+        "AFR": 224,
+        "EUR": 224,
+    }
+    assert selected["AFR"] == [sample for sample in samples["AFR"] if sample in selected["AFR"]]
+    assert selected["EUR"] == [sample for sample in samples["EUR"] if sample in selected["EUR"]]
+    afr_alone, _ = generate_map.select_population_samples({"AFR": samples["AFR"]}, 224, 42)
+    assert afr_alone["AFR"] == selected["AFR"]
+    repeated, _ = generate_map.select_population_samples(samples, 224, 42)
+    assert repeated == selected
+    assert stats["retained_after_qc"] == 580
+    assert stats["removed_by_population_subsample"] == 132
+    assert stats["retained"] == 448
+
+
+def test_population_subsample_seed_and_full_panel_modes() -> None:
+    samples = {"AFR": [f"sample-{index}" for index in range(250)]}
+    first, _ = generate_map.select_population_samples(samples, 224, 42)
+    second, _ = generate_map.select_population_samples(samples, 224, 43)
+    assert first != second
+    complete, stats = generate_map.select_population_samples(samples, 0, 42)
+    assert complete == samples
+    assert stats["removed_by_population_subsample"] == 0
+
+
+def test_population_subsample_rejects_insufficient_population() -> None:
+    with pytest.raises(ValueError, match="fewer than 224"):
+        generate_map.select_population_samples(
+            {"AFR": [f"sample-{index}" for index in range(223)]}, 224, 42
+        )
+
+
+def test_population_subsample_cli_defaults() -> None:
+    args = generate_map.parser().parse_args([])
+    assert args.samples_per_population == 224
+    assert args.sample_selection_seed == 42
+
+
 def test_aou_tsv_header_wins_over_comma_arrays(tmp_path: Path) -> None:
     ancestry = tmp_path / "ancestry_preds.tsv"
     ancestry.write_text(
