@@ -3,8 +3,9 @@
 
 For the first N simulations of each requested population, this script computes
 windowed segregating sites, Tajima's D, nucleotide diversity, and a folded SFS.
-Window geometry, population names, and panel sample counts all come from the
-theta-map artifact produced by ``generate_map.py``.
+Window geometry, population names, and raw S targets come from the map artifact
+produced by ``generate_map.py``; actual sample counts and target scaling come
+from the simulation-root contract.
 
 Outputs in ``--out-dir`` are:
 
@@ -313,11 +314,40 @@ def read_map_header(path: Path) -> tuple[int, list[str], dict[str, int]]:
     return window_size, populations, sample_counts
 
 
-def population_group(group: h5py.Group, population: str) -> h5py.Group:
-    for key in (population.lower(), population.upper(), population):
-        if key in group and isinstance(group[key], h5py.Group):
-            return group[key]
-    raise KeyError(f"population {population} is absent from {group.name}")
+def read_simulation_samples(
+    sim_dir: Path,
+    map_sha256: str,
+    populations: list[str],
+    map_sample_counts: dict[str, int],
+) -> tuple[dict[str, int], dict[str, float]]:
+    """Read the root contract so plots use the actual simulated targets and sample sizes."""
+    path = sim_dir / "simulation_contract.json"
+    try:
+        contract = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"cannot read simulation contract {path}: {error}") from error
+    global_contract = contract.get("global")
+    population_contracts = contract.get("populations")
+    if not isinstance(global_contract, dict) or not isinstance(population_contracts, dict):
+        raise ValueError(f"invalid simulation contract: {path}")
+    if str(global_contract.get("map_sha256", "")) != map_sha256:
+        raise ValueError("simulation contract map SHA256 differs from the requested map")
+    simulation_counts: dict[str, int] = {}
+    scales: dict[str, float] = {}
+    for population in populations:
+        entry = population_contracts.get(population)
+        if not isinstance(entry, dict):
+            raise ValueError(f"simulation contract has no entry for {population}")
+        map_count = int(entry.get("map_diploid_samples", 0))
+        simulation_count = int(entry.get("diploid_samples", 0))
+        scale = float(entry.get("S_scale", float("nan")))
+        if map_count != map_sample_counts[population] or simulation_count <= 0:
+            raise ValueError(f"invalid sample counts in simulation contract for {population}")
+        if not np.isfinite(scale) or scale <= 0:
+            raise ValueError(f"invalid S scale in simulation contract for {population}")
+        simulation_counts[population] = simulation_count
+        scales[population] = scale
+    return simulation_counts, scales
 
 
 def load_genome_layout(
@@ -337,14 +367,19 @@ def load_genome_layout(
     output_start = 0
     with h5py.File(path, "r") as handle:
         window_size = int(handle.attrs["window_size"])
+        map_populations = [value.upper() for value in decode_strings(handle["populations"][...])]
+        population_indices = {
+            population: map_populations.index(population) for population in populations
+        }
         absent = [chromosome for chromosome in chromosomes if chromosome not in handle]
         if absent:
             raise ValueError(f"map is missing requested chromosomes: {absent}")
         for chromosome in chromosomes:
             group = handle[chromosome]
-            starts = np.asarray(group["window_starts"], dtype=np.int64)
-            ends = np.asarray(group["window_ends"], dtype=np.int64)
             length_bp = int(group.attrs["length_bp"])
+            count = int(group.attrs["n_windows"])
+            starts = np.arange(count, dtype=np.int64) * window_size
+            ends = np.minimum(starts + window_size, length_bp)
             if (
                 len(starts) == 0
                 or starts.shape != ends.shape
@@ -356,7 +391,6 @@ def load_genome_layout(
             widths = ends - starts
             if np.any(widths <= 0) or np.any(widths > window_size):
                 raise ValueError(f"invalid window widths for {chromosome}")
-            count = len(starts)
             layouts[chromosome] = ChromosomeLayout(
                 edges=np.concatenate(([0.0], ends.astype(float))),
                 output_slice=slice(output_start, output_start + count),
@@ -365,17 +399,13 @@ def load_genome_layout(
             output_start += count
             offset += length_bp
             boundaries.append(offset)
+            matrix = group["S"]
+            if matrix.shape != (len(map_populations), count):
+                raise ValueError(f"invalid S matrix shape for {chromosome}: {matrix.shape}")
             for population in populations:
-                pop_group = population_group(group, population)
-                theta = np.asarray(pop_group["theta"], dtype=np.float32)
+                theta = np.asarray(matrix[population_indices[population]], dtype=np.float32)
                 if theta.shape != starts.shape:
-                    raise ValueError(f"theta shape mismatch for {population}/{chromosome}")
-                declared_count = int(pop_group["theta"].attrs.get("sample_count", 0))
-                if declared_count and declared_count != sample_counts[population]:
-                    raise ValueError(
-                        f"sample-count mismatch for {population}/{chromosome}: "
-                        f"{declared_count} != {sample_counts[population]}"
-                    )
+                    raise ValueError(f"S shape mismatch for {population}/{chromosome}")
                 targets_by_chrom[population][chromosome] = theta
 
     targets = {
@@ -492,7 +522,7 @@ def plot_population_genomewide(
         linewidth=1.0,
         linestyle="--",
         color="black",
-        label="target theta",
+        label="target S",
     )
     window_label = format_window_size(layout.window_size)
     axes[0].set_ylabel(f"seg sites / {window_label}")
@@ -590,7 +620,7 @@ def plot_summary(
     axes[1].set_xticks(positions)
     axes[1].set_xticklabels(populations)
     axes[1].set_ylabel(f"mean seg sites / {format_window_size(window_size)}")
-    axes[1].set_title("realized versus target theta")
+    axes[1].set_title("realized versus target S")
     axes[1].legend(fontsize=8)
     figure.tight_layout()
     output = out_dir / "summary_by_pop.png"
@@ -666,7 +696,7 @@ def parser() -> argparse.ArgumentParser:
         "--size",
         choices=("panel", "sim"),
         default="panel",
-        help="panel: map's embedded sample count; sim: all samples in each tree sequence",
+        help="panel: simulation-contract sample count; sim: all samples in each tree sequence",
     )
     result.add_argument("--workers", type=int, default=4)
     result.add_argument("--max-pending", type=int, default=0, help="Default: twice --workers")
@@ -699,10 +729,17 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"map does not exist: {map_path}; run generate_map.py first")
     map_sha256 = sha256_file(map_path)
     try:
-        window_size, embedded_populations, sample_counts = read_map_header(map_path)
+        window_size, embedded_populations, map_sample_counts = read_map_header(map_path)
         populations = parse_populations(args.pops, embedded_populations)
         chromosomes = parse_chroms(args.chroms)
-        layout = load_genome_layout(map_path, chromosomes, populations, sample_counts)
+        layout = load_genome_layout(map_path, chromosomes, populations, map_sample_counts)
+        sample_counts, target_scales = read_simulation_samples(
+            sim_dir, map_sha256, populations, map_sample_counts
+        )
+        for population in populations:
+            layout.targets[population] = np.floor(
+                layout.targets[population].astype(np.float64) * target_scales[population] + 0.5
+            ).astype(np.float32)
     except (KeyError, OSError, ValueError) as error:
         raise SystemExit(f"invalid map or selection: {error}") from error
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -712,10 +749,12 @@ def main(argv: list[str] | None = None) -> int:
         for chromosome, chromosome_layout in layout.chromosome_layouts.items()
     }
     total_units = args.n_sims * len(populations) * len(chromosomes)
-    panel_summary = ", ".join(f"{pop}: {sample_counts[pop]}" for pop in populations)
+    panel_summary = ", ".join(f"{pop}: {map_sample_counts[pop]}" for pop in populations)
+    simulation_summary = ", ".join(f"{pop}: {sample_counts[pop]}" for pop in populations)
     print(
         f"map={map_path} sha256={map_sha256} window={format_window_size(window_size)}\n"
-        f"pops={populations} panel_samples={{{panel_summary}}}\n"
+        f"pops={populations} map_samples={{{panel_summary}}} "
+        f"simulation_samples={{{simulation_summary}}}\n"
         f"chroms={chromosomes} sims=first {args.n_sims} size={args.size}\n"
         f"units={total_units:,} workers={args.workers} max_pending={max_pending}\n"
         f"sim_dir={sim_dir} out={out_dir}",
@@ -856,15 +895,15 @@ def main(argv: list[str] | None = None) -> int:
             used_max = max(accumulator.used_haplotypes)
             available_min = min(accumulator.available_haplotypes)
             available_max = max(accumulator.available_haplotypes)
-            panel_haplotypes = 2 * sample_counts[population]
+            expected_haplotypes = 2 * sample_counts[population]
             rows.append(
                 {
                     "pop": population,
                     "n_used_hap": used_min,
                     "n_used_dip": used_min // 2,
-                    "panel_dip": sample_counts[population],
+                    "panel_dip": map_sample_counts[population],
                     "sim_dip": available_min // 2,
-                    "shortfall_dip": max(0, panel_haplotypes - available_min) // 2,
+                    "shortfall_dip": max(0, expected_haplotypes - available_min) // 2,
                     "mean_S_realized": statistic_mean(accumulator, "segregating"),
                     "mean_theta_target": statistic_mean(accumulator, "target"),
                     "mean_TajD": statistic_mean(accumulator, "tajimas_d"),

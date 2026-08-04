@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import gzip
 import hashlib
 import io
 import json
@@ -31,7 +30,18 @@ from pathlib import Path
 import h5py
 import numpy as np
 
-from phase2_map import DEFAULT_POPS, SCHEMA, callable_from_mask, canonical_chrom, parse_chroms
+from phase2_map import (
+    DEFAULT_POPS,
+    SCHEMA,
+    callable_from_mask,
+    canonical_chrom,
+    clip_merged_mask,
+    load_mask,
+    merge_intervals,  # noqa: F401 - retained as a public compatibility helper
+    parse_chroms,
+    watterson_a_n,
+    window_geometry,
+)
 
 DEFAULT_BCF_TEMPLATE = (
     "gs://rw-long-reads-transfer-2026-06-17/v9/lrWGS/panel/panel/"
@@ -64,14 +74,6 @@ def sha256_file(path: Path, chunk_size: int = 8 << 20) -> str:
         while chunk := handle.read(chunk_size):
             digest.update(chunk)
     return digest.hexdigest()
-
-
-def watterson_a_n(diploid_samples: int) -> float:
-    """Return a_n for the expected 2N sampled haplotypes."""
-    if diploid_samples <= 0:
-        raise ValueError("diploid sample count must be positive")
-    haplotypes = 2 * diploid_samples
-    return math.fsum(1.0 / index for index in range(1, haplotypes))
 
 
 def atomic_text(path: Path, text: str) -> None:
@@ -490,81 +492,6 @@ def bcf_header(path: Path, bcftools: str) -> tuple[dict[str, int], list[str], st
 def bcftools_version(executable: str) -> str:
     result = subprocess.run([executable, "--version"], check=True, capture_output=True, text=True)
     return result.stdout.splitlines()[0].strip()
-
-
-def merge_intervals(intervals: Iterable[tuple[int, int]], length_bp: int) -> np.ndarray:
-    clipped = sorted(
-        (max(0, int(start)), min(length_bp, int(end)))
-        for start, end in intervals
-        if int(end) > 0 and int(start) < length_bp and int(end) > int(start)
-    )
-    merged: list[list[int]] = []
-    for start, end in clipped:
-        if not merged or start > merged[-1][1]:
-            merged.append([start, end])
-        else:
-            merged[-1][1] = max(merged[-1][1], end)
-    return np.asarray(merged, dtype=np.int64).reshape(-1, 2)
-
-
-def load_mask(path: Path | None, chromosomes: Iterable[str]) -> dict[str, np.ndarray]:
-    wanted = {canonical_chrom(chrom) for chrom in chromosomes}
-    buckets: dict[str, list[list[int]]] = {chrom: [] for chrom in wanted}
-    if path is None:
-        return {chrom: np.empty((0, 2), dtype=np.int64) for chrom in wanted}
-    handle = (
-        gzip.open(path, "rt", encoding="utf-8")
-        if path.suffix.lower() == ".gz"
-        else path.open("r", encoding="utf-8")
-    )
-    with handle:
-        for line_number, line in enumerate(handle, 1):
-            if not line.strip() or line.startswith(("#", "track", "browser")):
-                continue
-            fields = line.split()
-            if len(fields) < 3:
-                raise ValueError(f"{path}:{line_number}: expected at least three BED columns")
-            chrom = canonical_chrom(fields[0])
-            if chrom not in buckets:
-                continue
-            start, end = int(fields[1]), int(fields[2])
-            if end <= start:
-                raise ValueError(f"{path}:{line_number}: BED end must exceed start")
-            bucket = buckets[chrom]
-            if bucket and start < bucket[-1][0]:
-                raise ValueError(f"{path}:{line_number}: BED must be position-sorted per contig")
-            if bucket and start <= bucket[-1][1]:
-                bucket[-1][1] = max(bucket[-1][1], end)
-            else:
-                bucket.append([start, end])
-    return {
-        chrom: np.asarray(intervals, dtype=np.int64).reshape(-1, 2)
-        for chrom, intervals in buckets.items()
-    }
-
-
-def clip_merged_mask(mask: np.ndarray, length_bp: int) -> np.ndarray:
-    mask = np.asarray(mask, dtype=np.int64).reshape(-1, 2)
-    if len(mask) == 0:
-        return mask
-    result = mask.copy()
-    result[:, 0] = np.maximum(result[:, 0], 0)
-    result[:, 1] = np.minimum(result[:, 1], length_bp)
-    result = result[result[:, 1] > result[:, 0]]
-    if len(result) == 0:
-        raise RuntimeError(
-            "hard-mask intervals exist for the contig but none overlap its BCF length; "
-            "check the assembly and contig coordinates"
-        )
-    return result
-
-
-def window_geometry(
-    length_bp: int, window_size: int, mask: np.ndarray
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    starts = np.arange(0, length_bp, window_size, dtype=np.int64)
-    ends = np.minimum(starts + window_size, length_bp)
-    return starts, ends, callable_from_mask(starts, ends, mask)
 
 
 def write_normalized_mask(path: Path, contig: str, mask: np.ndarray) -> None:
@@ -1072,6 +999,7 @@ def write_hdf5(
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = output.with_name(f".{output.name}.{os.getpid()}.tmp")
     totals = {pop: 0 for pop in populations}
+    total_windows = 0
     chromosome_stats: dict[str, dict[str, object]] = {}
     expected_an = {pop: 2 * len(samples[pop]) for pop in populations}
     minimum_an = {pop: math.ceil(expected_an[pop] * args.min_call_rate) for pop in populations}
@@ -1084,10 +1012,15 @@ def write_hdf5(
                     "complete": False,
                     "assembly": "GRCh38",
                     "window_size": args.window_size,
-                    "coordinate_system": "0-based half-open windows; BCF POS converted with %POS0",
+                    "coordinate_system": (
+                        "implicit 0-based half-open windows; window i starts at i*window_size; "
+                        "final end is chromosome length_bp"
+                    ),
+                    "matrix_layout": "one S[population, window] array per chromosome",
+                    "matrix_compression": "gzip level 6 + shuffle + fletcher32",
                     "theta_definition": (
-                        "backward-compatible dataset name storing raw S: the number of distinct "
-                        "unmasked biallelic SNV positions with 0 < AC < AN and "
+                        "backward-compatible metadata alias describing stored raw S: the number "
+                        "of distinct unmasked biallelic SNV positions with 0 < AC < AN and "
                         "AN >= ceil(2 * diploid sample count * min_call_rate) within the named "
                         "population; no a_n normalization is applied"
                     ),
@@ -1108,6 +1041,7 @@ def write_hdf5(
                     "bcf_filters": args.filters,
                     "bcftools_version": args.bcftools_version,
                     "sample_manifest_sha256": sample_digest,
+                    "hardmask_source": args.hardmask or "NONE",
                     "hardmask_sha256": mask_digest,
                     "selection_json": json.dumps(selection_stats, sort_keys=True),
                     "input_provenance_json": json.dumps(input_provenance or {}, sort_keys=True),
@@ -1120,6 +1054,13 @@ def write_hdf5(
                 "sample_counts",
                 data=np.asarray([len(samples[pop]) for pop in populations], dtype=np.uint32),
             )
+            handle.create_dataset(
+                "watterson_a_n",
+                data=np.asarray(
+                    [watterson_denominators[pop] for pop in populations], dtype=np.float64
+                ),
+            )
+            handle.create_dataset("chromosomes", data=fixed_ascii(checkpoints))
             sample_group = handle.create_group("samples")
             for pop in populations:
                 values = fixed_ascii(samples[pop])
@@ -1146,21 +1087,10 @@ def write_hdf5(
                             "bcf_header_sha256": str(data["header_sha256"]),
                         }
                     )
-                    common = dict(
-                        compression="gzip",
-                        compression_opts=6,
-                        shuffle=True,
-                        fletcher32=True,
-                    )
-                    group.create_dataset("window_starts", data=data["starts"], **common)
-                    group.create_dataset("window_ends", data=data["ends"], **common)
-                    group.create_dataset("callable_bp", data=data["callable_bp"], **common)
-                    mask_intervals = np.asarray(data["mask_intervals"])
-                    if len(mask_intervals):
-                        group.create_dataset("mask_intervals", data=mask_intervals, **common)
-                    else:
-                        group.create_dataset("mask_intervals", data=mask_intervals)
-                    theta = np.asarray(data["theta"])
+                    theta = compact_unsigned(np.asarray(data["theta"], dtype=np.int64))
+                    n_windows = int(theta.shape[1])
+                    group.attrs["n_windows"] = n_windows
+                    total_windows += n_windows
                     checkpoint_expected = np.asarray(data["expected_an"], dtype=np.int64)
                     checkpoint_minimum = np.asarray(data["minimum_an"], dtype=np.int64)
                     declared_expected = np.asarray(
@@ -1177,29 +1107,34 @@ def write_hdf5(
                         raise ValueError(f"call-rate policy mismatch in {checkpoint}")
                     qc = json.loads(str(data["qc_json"]))
                     group.attrs["qc_json"] = json.dumps(qc, sort_keys=True)
+                    group.attrs["segregating_positions_excluded_low_an_json"] = json.dumps(
+                        qc["segregating_positions_excluded_low_an"], sort_keys=True
+                    )
+                    dataset = group.create_dataset(
+                        "S",
+                        data=theta,
+                        chunks=(1, min(n_windows, 8_192)),
+                        compression="gzip",
+                        compression_opts=6,
+                        shuffle=True,
+                        fletcher32=True,
+                    )
+                    dataset.attrs["axes"] = "population,window"
+                    dataset.attrs["population_order"] = "/populations"
+                    dataset.attrs["stored_statistic"] = "S"
+                    dataset.attrs["normalization_applied"] = "none"
+                    dataset.attrs["units"] = "segregating biallelic SNV positions per window"
                     for index, pop in enumerate(populations):
-                        pop_group = group.create_group(pop.lower())
-                        dataset = pop_group.create_dataset("theta", data=theta[index], **common)
-                        dataset.attrs["sample_count"] = len(samples[pop])
-                        dataset.attrs["expected_an"] = expected_an[pop]
-                        dataset.attrs["minimum_an"] = minimum_an[pop]
-                        dataset.attrs["min_call_rate"] = float(args.min_call_rate)
-                        dataset.attrs["stored_statistic"] = "S"
-                        dataset.attrs["normalization_applied"] = "none"
-                        dataset.attrs["watterson_a_n"] = watterson_denominators[pop]
-                        dataset.attrs["watterson_theta_formula"] = "theta_W = S / a_n"
-                        dataset.attrs["segregating_positions_excluded_low_an"] = int(
-                            qc["segregating_positions_excluded_low_an"][pop]
-                        )
-                        dataset.attrs["units"] = "segregating SNV sites per window"
                         totals[pop] += int(theta[index].sum())
                     chromosome_stats[chromosome] = {
                         "length_bp": int(data["length_bp"]),
-                        "windows": int(theta.shape[1]),
-                        "callable_bp": int(np.asarray(data["callable_bp"], dtype=np.int64).sum()),
+                        "windows": n_windows,
+                        "matrix_shape": [len(populations), n_windows],
+                        "matrix_dtype": str(theta.dtype),
                         "source_identity": json.loads(str(data["source_identity_json"])),
                         "qc": qc,
                     }
+            handle.attrs["total_windows"] = total_windows
             handle.attrs["complete"] = True
             handle.flush()
         os.replace(temporary, output)
@@ -1212,6 +1147,7 @@ def write_hdf5(
         "sha256": digest,
         "size_bytes": output.stat().st_size,
         "window_size": args.window_size,
+        "total_windows": total_windows,
         "populations": list(populations),
         "sample_counts": {pop: len(samples[pop]) for pop in populations},
         "callability_policy": {
@@ -1223,6 +1159,9 @@ def write_hdf5(
         "selection": selection_stats,
         "input_provenance": input_provenance or {},
         "stored_statistic": "S_raw_biallelic_segregating_snv_count",
+        "matrix_layout": "one S[population, window] array per chromosome",
+        "matrix_compression": "gzip level 6 + shuffle + fletcher32",
+        "hardmask": {"source": args.hardmask or "NONE", "sha256": mask_digest},
         "watterson_a_n": watterson_denominators,
         "watterson_theta_formula": "theta_W = S / a_n",
         "segregating_site_totals": totals,

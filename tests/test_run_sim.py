@@ -14,7 +14,7 @@ import tskit
 import tszip
 
 import run_sim
-from phase2_map import SCHEMA, callable_from_mask
+from phase2_map import SCHEMA, watterson_a_n
 
 
 def toy_ancestry(length: int = 35_000, samples: int = 10):
@@ -47,6 +47,7 @@ def toy_contract(
 ) -> dict[str, object]:
     config = {
         "map_sha256": "toy-map",
+        "mask_sha256": "toy-mask",
         "demography_cache": {"AFR": {"key": "toy-demography"}},
         "base_seed": 42,
         "recombination_rate": 1e-8,
@@ -62,7 +63,13 @@ def toy_contract(
         sample_count=samples,
         length_bp=35_000,
         window_size=10_000,
+        callable_bp=34_500,
+        source_sites=int(target.sum()),
         target_sites=int(target.sum()),
+        map_sample_count=samples,
+        map_a_n=watterson_a_n(samples),
+        simulation_a_n=watterson_a_n(samples),
+        target_scale=1.0,
     )
     return contract
 
@@ -191,25 +198,39 @@ def test_recurrent_sites_are_not_eligible() -> None:
     assert len(eligible) == 0
 
 
-def write_toy_map(path: Path, target: np.ndarray | None = None) -> None:
-    starts, ends, mask = geometry()
+def write_toy_map(
+    path: Path,
+    target: np.ndarray | None = None,
+    *,
+    mask_source: str = "NONE",
+    mask_sha256: str | None = None,
+) -> None:
     if target is None:
         target = np.array([2, 3, 0, 1], dtype=np.uint16)
     target = np.asarray(target, dtype=np.uint16)
+    if mask_sha256 is None:
+        mask_sha256 = hashlib.sha256(b"NO_MASK").hexdigest()
     with h5py.File(path, "w") as handle:
-        handle.attrs.update({"schema": SCHEMA, "complete": True, "window_size": 10_000})
+        handle.attrs.update(
+            {
+                "schema": SCHEMA,
+                "complete": True,
+                "window_size": 10_000,
+                "total_windows": 4,
+                "hardmask_source": mask_source,
+                "hardmask_sha256": mask_sha256,
+            }
+        )
         handle.create_dataset("populations", data=np.array([b"AFR"]))
+        handle.create_dataset("sample_counts", data=np.array([3], dtype=np.uint32))
+        handle.create_dataset("watterson_a_n", data=np.array([watterson_a_n(3)]))
         samples = handle.create_group("samples")
         dataset = samples.create_dataset("AFR", data=np.array([b"1", b"2", b"3"]))
         dataset.attrs["count"] = 3
         chromosome = handle.create_group("chr1")
         chromosome.attrs["length_bp"] = 35_000
-        chromosome.create_dataset("window_starts", data=starts)
-        chromosome.create_dataset("window_ends", data=ends)
-        chromosome.create_dataset("callable_bp", data=callable_from_mask(starts, ends, mask))
-        chromosome.create_dataset("mask_intervals", data=mask)
-        population = chromosome.create_group("afr")
-        population.create_dataset("theta", data=target)
+        chromosome.attrs["n_windows"] = 4
+        chromosome.create_dataset("S", data=target.reshape(1, -1))
 
 
 def test_map_snapshot_is_content_addressed_immutable_and_race_safe(tmp_path: Path) -> None:
@@ -259,9 +280,61 @@ def test_map_snapshot_reads_the_source_exactly_once(
     assert snapshot.sha256 == hashlib.sha256(expected).hexdigest()
 
 
+def test_mask_snapshot_verifies_local_content(tmp_path: Path) -> None:
+    mask = tmp_path / "mask.bed"
+    cache = tmp_path / "mask-cache"
+    mask.write_text("chr1\t10\t20\n", encoding="utf-8")
+    digest = run_sim.sha256_file(mask)
+    snapshot = run_sim.snapshot_mask(str(mask), cache, expected_sha256=digest)
+    assert snapshot.path == cache.resolve() / f"hardmask.{digest}.bed"
+    assert snapshot.path.read_bytes() == mask.read_bytes()
+    assert snapshot.sha256 == digest
+    with pytest.raises(ValueError, match="differs from the map contract"):
+        run_sim.snapshot_mask(str(mask), cache, expected_sha256="0" * 64)
+
+
+def test_runtime_target_density_and_sample_rescaling() -> None:
+    raw_s = np.array([0, 1, 2, 10], dtype=np.int64)
+    callable_bp = np.array([0, 100, 200, 1_000], dtype=np.int64)
+    source_a_n = watterson_a_n(100)
+    exact, density, scale = run_sim.runtime_target_from_raw_s(
+        raw_s,
+        callable_bp,
+        map_a_n=source_a_n,
+        simulation_a_n=source_a_n,
+    )
+    np.testing.assert_array_equal(exact, raw_s)
+    np.testing.assert_allclose(density[1:], raw_s[1:] / (source_a_n * callable_bp[1:]))
+    assert density[0] == 0.0
+    assert scale == 1.0
+
+    target_a_n = watterson_a_n(3)
+    rescaled, _, scale = run_sim.runtime_target_from_raw_s(
+        raw_s,
+        callable_bp,
+        map_a_n=source_a_n,
+        simulation_a_n=target_a_n,
+    )
+    np.testing.assert_array_equal(
+        rescaled, np.floor(raw_s * (target_a_n / source_a_n) + 0.5).astype(np.int64)
+    )
+    assert scale == pytest.approx(target_a_n / source_a_n)
+
+
 def toy_sim_config(tmp_path: Path, target: np.ndarray) -> dict[str, object]:
+    _, _, mask = geometry()
+    mask_path = tmp_path / "mask.bed"
+    mask_path.write_text(
+        "".join(f"chr1\t{start}\t{end}\n" for start, end in mask), encoding="utf-8"
+    )
+    mask_sha256 = run_sim.sha256_file(mask_path)
     map_source = tmp_path / "map.h5"
-    write_toy_map(map_source, target)
+    write_toy_map(
+        map_source,
+        target,
+        mask_source=str(mask_path),
+        mask_sha256=mask_sha256,
+    )
     map_snapshot = run_sim.snapshot_map_h5(map_source, tmp_path / "map_snapshots")
     demography = tmp_path / "AFR.npz"
     np.savez_compressed(
@@ -273,9 +346,15 @@ def toy_sim_config(tmp_path: Path, target: np.ndarray) -> dict[str, object]:
     return {
         "map_path": str(map_snapshot.path),
         "map_sha256": map_snapshot.sha256,
+        "mask_path": str(mask_path),
+        "mask_source": str(mask_path),
+        "mask_sha256": mask_sha256,
         "sim_dir": str(tmp_path / "sims"),
         "demography_cache": {"AFR": {"path": str(demography), "key": "demo"}},
+        "map_sample_counts": {"AFR": 3},
+        "map_watterson_a_n": {"AFR": watterson_a_n(3)},
         "sample_counts": {"AFR": 3},
+        "simulation_watterson_a_n": {"AFR": watterson_a_n(3)},
         "base_seed": 42,
         "recombination_rate": 1e-8,
         "initial_rate": 1e-5,
@@ -293,10 +372,18 @@ def root_guard_config(sim_dir: Path, populations: tuple[str, ...]) -> dict[str, 
     return {
         "sim_dir": str(sim_dir),
         "map_sha256": "a" * 64,
+        "mask_sha256": "b" * 64,
         "demography_cache": {
             population: {"key": f"demography-{population.lower()}"} for population in populations
         },
+        "map_sample_counts": sample_counts.copy(),
+        "map_watterson_a_n": {
+            population: watterson_a_n(count) for population, count in sample_counts.items()
+        },
         "sample_counts": sample_counts,
+        "simulation_watterson_a_n": {
+            population: watterson_a_n(count) for population, count in sample_counts.items()
+        },
         "base_seed": 42,
         "recombination_rate": 1e-8,
         "initial_rate": 5e-8,
@@ -320,6 +407,14 @@ def test_sim_root_contract_concurrently_extends_compatible_populations(tmp_path:
         assert manifest["populations"][population] == {
             "demography_key": f"demography-{population.lower()}",
             "diploid_samples": 10 + run_sim.DEFAULT_POPS.index(population),
+            "map_diploid_samples": 10 + run_sim.DEFAULT_POPS.index(population),
+            "map_watterson_a_n": pytest.approx(
+                watterson_a_n(10 + run_sim.DEFAULT_POPS.index(population))
+            ),
+            "simulation_watterson_a_n": pytest.approx(
+                watterson_a_n(10 + run_sim.DEFAULT_POPS.index(population))
+            ),
+            "S_scale": 1.0,
         }
 
     # A compatible subset reuses the union without dropping other populations.

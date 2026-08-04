@@ -3,8 +3,7 @@
 This repository has two separate, explicit stages:
 
 1. `generate_map.py` measures the empirical number of segregating biallelic
-   SNV positions (`S`, retained under the legacy dataset name `theta`) in each
-   10 kb window and population.
+   SNV positions (`S`) in each 10 kb window and population.
 2. `run_sim.py` simulates ancestry, generates an excess of candidate
    mutations, and retains exactly the empirical number of unmasked,
    biallelic, segregating sites in every window.
@@ -95,24 +94,33 @@ uv run python -u generate_map.py \
   --upload gs://YOUR_BUCKET/simulate_phase2_maps
 ```
 
-The HDF5 embeds the exact ordered population samples, sample hashes/counts,
-window coordinates, callable-base counts, normalized hard-mask intervals,
-source/header fingerprints, and QC totals. Counts and callable bases are
-compressed `uint16` at the default 10 kb resolution (and safely promote to
-`uint32` for unusually wide custom windows), so the whole-autosome map is only
-one compressed, MB-scale artifact rather than a many-file Zarr directory. GCS
-generation, size, and available CRC/MD5 metadata are part of cache and
-checkpoint identities.
+The final HDF5 is deliberately small. Each chromosome contains one matrix
+`S[population, window]`, normally `uint16` because a 10 kb window cannot contain
+more than 10,000 distinct SNV positions. A custom window large enough to exceed
+the type is safely promoted to `uint32`. Every matrix uses HDF5 gzip level 6,
+shuffle, Fletcher32 checksums, and population-major chunks, so one population
+row can be read without inflating the other rows. Root metadata records the
+window size, total number of windows, population order, sample counts and
+Watterson `a_n`, plus the hard-mask source and SHA256. Each chromosome records
+its length and window count; starts and ends are implicit from those values.
+
+Window coordinates, callable-base vectors, and mask intervals are intentionally
+not duplicated in the final HDF5. `run_sim.py` verifies the recorded mask by
+SHA256 and regenerates them at runtime. Resumable generation checkpoints remain
+compressed `.npz` files and contain the temporary geometry needed to validate
+interrupted work before final assembly. Source BCF fingerprints and QC summaries
+remain in the HDF5/JSON provenance.
 
 The checked-in `mvn/mutation_rate_map_perpop_all.h5` is a legacy 20 kb file
-without provenance or an embedded mask. `run_sim.py` intentionally rejects it;
-regenerate the map with `generate_map.py`.
+without the v2 provenance or compact matrix contract. `run_sim.py`
+intentionally rejects it; regenerate the map with `generate_map.py`.
 
 ## Run calibrated simulations
 
 ```bash
 uv run python -u run_sim.py \
   --map "$HOME/snv_theta_map.10kb.h5" \
+  --mask "$HOME/hardmask.hg38.v4.over99.bed" \
   --map-snapshot-dir "$HOME/simulate_phase2_map_snapshots" \
   --mvn-dir mvn \
   --demography-cache "$HOME/simulate_phase2_demographies" \
@@ -127,6 +135,13 @@ is safe when two launchers start together, and a source file that changes
 during copying is rejected. By default snapshots live under
 `<demography-cache>/map_snapshots`; use `--map-snapshot-dir` to place this small
 local cache explicitly.
+
+`--mask` accepts a local BED/BED.gz file or a `gs://` URI. If omitted, the
+runner uses the source URI/path recorded in the map. In either case, its SHA256
+must exactly match the map contract, preventing a different mask from silently
+changing callable bases. Cloud masks are downloaded once into the
+content-addressed `<demography-cache>/mask_snapshots` cache (or
+`--mask-cache-dir`).
 
 Before starting the worker pool, the launcher also creates
 `simulation_contract.json` at the simulation root under a cross-process lock.
@@ -143,7 +158,8 @@ Simulation defaults are:
 - 1,000 simulations per population
 - four process workers, with at most eight submitted tasks in memory
 - population sample counts read from the map (the full, population-specific
-  QC-gated counts for a map generated with defaults)
+  QC-gated counts for a map generated with defaults); use
+  `--samples-per-population 224` to request a smaller common simulation count
 - recombination rate `1e-8` per bp per generation
 - initial candidate mutation rate `5e-8`
 - retry candidate mutation rate `1e-7`, restricted to deficient windows
@@ -160,14 +176,19 @@ The runner retains useful candidates from the first draw, excludes every
 masked or recurrent site, prevents retry collisions, and writes `.tsz` files
 atomically. Before publication, tskit independently verifies that every site
 is biallelic and segregating and that the complete per-window vector equals
-the empirical `theta` vector. Exhausted retries are errors and never produce a
+the requested `S` vector. Exhausted retries are errors and never produce a
 completed artifact.
 
-`run_sim.py` currently simulates the exact diploid count embedded in the map.
-Consequently, a default full-panel map requests full-panel simulations, which
-can be substantially more expensive than 224-diploid simulations. The map keeps
-raw `S` plus `a_n` so a later workflow can explicitly rescale counts before a
-smaller simulation; no implicit rescaling occurs in the current runner.
+At simulation time the runner computes the effective Watterson density in each
+window as `theta_W / callable_bp = S / (a_n,map * callable_bp)`.
+
+With the default sample count, the target vector is exactly the stored raw `S`.
+If `--samples-per-population N` is nonzero, it deterministically rescales each
+window to `round_half_up(S * a_n,N / a_n,map)`. The map sample count, simulation
+sample count, both `a_n` values, scale, callable-base total, raw-S total, target
+total, and effective-density summary are recorded in the simulation contract
+and completion sidecar. This is a Watterson approximation when source sites
+have missing genotypes; the original counts remain unchanged in the map.
 
 Exact thinning intentionally conditions each simulated window on the observed
 segregating-site count. This preserves the candidate mutations' conditional

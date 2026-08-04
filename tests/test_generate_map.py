@@ -250,7 +250,7 @@ def test_localize_downloads_described_gcs_generation(
 
 
 def test_nonempty_mask_outside_contig_is_fatal() -> None:
-    with pytest.raises(RuntimeError, match="none overlap its BCF length"):
+    with pytest.raises(ValueError, match="do not overlap its map length"):
         generate_map.clip_merged_mask(np.array([[30_000, 40_000]]), 25_000)
 
 
@@ -476,6 +476,7 @@ def test_compact_hdf5_round_trip(tmp_path: Path) -> None:
         filters="PASS,.",
         bcftools_version="bcftools 1.22",
         min_call_rate=0.5,
+        hardmask="toy-mask.bed",
     )
     output = tmp_path / "map.h5"
     summary = generate_map.write_hdf5(
@@ -495,21 +496,35 @@ def test_compact_hdf5_round_trip(tmp_path: Path) -> None:
         {"AFR": 1.0 + 1.0 / 2.0 + 1.0 / 3.0, "EUR": 1.0}
     )
     assert summary["callability_policy"]["minimum_an"] == {"AFR": 2, "EUR": 1}
+    assert summary["total_windows"] == 4
+    assert summary["hardmask"] == {"source": "toy-mask.bed", "sha256": "mask"}
     with h5py.File(output, "r") as handle:
         assert handle.attrs["schema"] == SCHEMA
         assert bool(handle.attrs["complete"])
-        dataset = handle["chr1/afr/theta"]
+        assert handle.attrs["total_windows"] == 4
+        assert handle.attrs["hardmask_source"] == "toy-mask.bed"
+        assert handle.attrs["hardmask_sha256"] == "mask"
+        assert handle["chr1"].attrs["n_windows"] == 4
+        dataset = handle["chr1/S"]
+        assert dataset.shape == (2, 4)
         assert dataset.dtype == np.dtype("uint16")
         assert dataset.compression == "gzip"
+        assert dataset.compression_opts == 6
+        assert dataset.shuffle
         assert dataset.fletcher32
         assert dataset.attrs["stored_statistic"] == "S"
         assert dataset.attrs["normalization_applied"] == "none"
-        assert dataset.attrs["watterson_a_n"] == pytest.approx(1.0 + 1.0 / 2.0 + 1.0 / 3.0)
-        assert dataset.attrs["minimum_an"] == 2
-        assert dataset.attrs["segregating_positions_excluded_low_an"] == 3
+        np.testing.assert_array_equal(dataset[...], theta)
+        for omitted in ("window_starts", "window_ends", "callable_bp", "mask_intervals"):
+            assert omitted not in handle["chr1"]
         assert json.loads(handle["chr1"].attrs["qc_json"])[
             "segregating_positions_excluded_low_an"
         ] == {"AFR": 3, "EUR": 1}
-    target = load_target(output, "1", "afr")
+    target = load_target(
+        output,
+        "1",
+        "afr",
+        mask_intervals=np.array([[20_100, 20_200]], dtype=np.int64),
+    )
     np.testing.assert_array_equal(target.theta, theta[0])
     np.testing.assert_array_equal(target.mask_intervals, [[20_100, 20_200]])

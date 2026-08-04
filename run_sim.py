@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Run map-calibrated msprime simulations with exact 10 kb SNV targets.
 
-``theta`` in the input HDF5 is an empirical count of segregating SNV sites,
-not an msprime mutation probability.  For each chromosome this runner creates
+``S`` in the input HDF5 is an empirical count of segregating SNV sites, not an
+msprime mutation probability.  For each chromosome this runner creates
 candidate mutations at 5e-8, removes masked/recurrent/non-segregating sites,
 thins to the per-window targets, and fills only deficient windows with repeated
 1e-7 candidate draws.  An output is published only after exact validation.
@@ -19,6 +19,8 @@ import hashlib
 import inspect
 import json
 import os
+import shutil
+import subprocess
 import tempfile
 import time
 import traceback
@@ -50,17 +52,23 @@ from phase2_map import (
     SCHEMA,
     ChromosomeTarget,
     canonical_chrom,
+    clip_merged_mask,
+    load_mask,
     map_sample_counts,
+    map_watterson_a_n,
     parse_chroms,
+    watterson_a_n,
+    window_geometry,
 )
 
 DEFAULT_RECOMBINATION_RATE = 1e-8
 DEFAULT_INITIAL_RATE = 5e-8
 DEFAULT_RETRY_RATE = 1e-7
-ALGORITHM_VERSION = "simulatephase2.calibrated-snv/v4"
+ALGORITHM_VERSION = "simulatephase2.calibrated-snv/v5-runtime-mask"
 DETERMINISTIC_PROVENANCE_TIMESTAMP = "1970-01-01T00:00:00Z"
-SIM_ROOT_CONTRACT_SCHEMA = "simulatephase2.sim-root-contract/v1"
+SIM_ROOT_CONTRACT_SCHEMA = "simulatephase2.sim-root-contract/v2"
 SIM_ROOT_CONTRACT_NAME = "simulation_contract.json"
+TARGET_POLICY = "raw-S-to-target-by-watterson-a_n-round-half-up/v1"
 SEED_MODULUS = 4_294_967_291  # largest prime below 2**32
 SEED_CHANNELS = 256
 
@@ -80,6 +88,15 @@ class MapSnapshot:
     path: Path
     sha256: str
     size_bytes: int
+
+
+@dataclass(frozen=True)
+class MaskSnapshot:
+    """Verified local copy of the mask named by the map contract."""
+
+    path: Path | None
+    source: str
+    sha256: str
 
 
 def atomic_text(path: Path, text: str) -> None:
@@ -189,6 +206,92 @@ def snapshot_map_h5(source: Path, directory: Path, *, chunk_size: int = 8 << 20)
         temporary.unlink(missing_ok=True)
 
 
+def snapshot_mask(
+    source: str,
+    directory: Path,
+    *,
+    expected_sha256: str,
+    gcloud: str = "gcloud",
+    billing_project: str | None = None,
+) -> MaskSnapshot:
+    """Localize a mask once and reject content that differs from the map contract."""
+    source = str(source).strip()
+    expected_sha256 = str(expected_sha256).strip().lower()
+    if source == "NONE":
+        observed = hashlib.sha256(b"NO_MASK").hexdigest()
+        if expected_sha256 != observed:
+            raise ValueError("unmasked map has an invalid hardmask SHA256")
+        return MaskSnapshot(path=None, source=source, sha256=observed)
+    if len(expected_sha256) != 64 or any(
+        character not in "0123456789abcdef" for character in expected_sha256
+    ):
+        raise ValueError("map does not contain a valid hardmask SHA256")
+    directory = directory.expanduser().resolve()
+    directory.mkdir(parents=True, exist_ok=True)
+    suffix = ".bed.gz" if source.lower().endswith(".gz") else ".bed"
+    destination = directory / f"hardmask.{expected_sha256}{suffix}"
+    local_source: Path | None = None
+    if not source.startswith("gs://"):
+        local_source = Path(source).expanduser().resolve()
+        if not local_source.is_file():
+            raise FileNotFoundError(local_source)
+        if local_source == destination:
+            observed = sha256_file(local_source)
+            if observed != expected_sha256:
+                raise ValueError(
+                    f"mask SHA256 differs from the map contract: {observed} != {expected_sha256}"
+                )
+            return MaskSnapshot(path=destination, source=source, sha256=observed)
+    else:
+        if shutil.which(gcloud) is None:
+            raise FileNotFoundError(f"gcloud executable not found: {gcloud}")
+    lock = directory / f".{destination.name}.lock"
+    with output_lock(lock):
+        if destination.is_file() and sha256_file(destination) == expected_sha256:
+            return MaskSnapshot(destination, source, expected_sha256)
+        destination.unlink(missing_ok=True)
+        descriptor, temporary_name = tempfile.mkstemp(prefix=f".{destination.name}.", dir=directory)
+        temporary = Path(temporary_name)
+        try:
+            if local_source is None:
+                os.close(descriptor)
+                command = [gcloud]
+                if billing_project:
+                    command.extend(["--billing-project", billing_project])
+                command.extend(["storage", "cp", "--quiet", source, str(temporary)])
+                subprocess.run(command, check=True)
+                observed = sha256_file(temporary)
+            else:
+                digest = hashlib.sha256()
+                with (
+                    os.fdopen(descriptor, "wb") as output_handle,
+                    local_source.open("rb") as input_handle,
+                ):
+                    before = os.fstat(input_handle.fileno())
+                    while chunk := input_handle.read(8 << 20):
+                        digest.update(chunk)
+                        output_handle.write(chunk)
+                    after_open = os.fstat(input_handle.fileno())
+                    output_handle.flush()
+                    os.fsync(output_handle.fileno())
+                after_path = local_source.stat()
+                if _file_identity(before) != _file_identity(after_open) or _file_identity(
+                    before
+                ) != _file_identity(after_path):
+                    raise RuntimeError(
+                        f"mask changed while it was being snapshotted: {local_source}"
+                    )
+                observed = digest.hexdigest()
+            if observed != expected_sha256:
+                raise ValueError(
+                    f"mask SHA256 differs from the map contract: {observed} != {expected_sha256}"
+                )
+            os.replace(temporary, destination)
+        finally:
+            temporary.unlink(missing_ok=True)
+    return MaskSnapshot(destination, source, expected_sha256)
+
+
 def simulation_software_versions() -> dict[str, str]:
     return {
         "msprime": msprime.__version__,
@@ -205,8 +308,14 @@ class SimRootContractMismatch(RuntimeError):
 def requested_sim_root_contract(config: dict[str, object]) -> dict[str, object]:
     demography_cache = config.get("demography_cache")
     sample_counts = config.get("sample_counts")
-    if not isinstance(demography_cache, dict) or not isinstance(sample_counts, dict):
-        raise ValueError("simulation config lacks demography or sample-count mappings")
+    map_sample_counts = config.get("map_sample_counts")
+    map_a_n = config.get("map_watterson_a_n")
+    simulation_a_n = config.get("simulation_watterson_a_n")
+    if not all(
+        isinstance(value, dict)
+        for value in (demography_cache, sample_counts, map_sample_counts, map_a_n, simulation_a_n)
+    ):
+        raise ValueError("simulation config lacks demography or sample-size mappings")
     populations: dict[str, dict[str, object]] = {}
     for raw_population, raw_count in sample_counts.items():
         population = str(raw_population).upper()
@@ -216,6 +325,10 @@ def requested_sim_root_contract(config: dict[str, object]) -> dict[str, object]:
         populations[population] = {
             "demography_key": str(demography["key"]),
             "diploid_samples": int(raw_count),
+            "map_diploid_samples": int(map_sample_counts[population]),
+            "map_watterson_a_n": float(map_a_n[population]),
+            "simulation_watterson_a_n": float(simulation_a_n[population]),
+            "S_scale": float(simulation_a_n[population]) / float(map_a_n[population]),
         }
     if not populations:
         raise ValueError("simulation config selects no populations")
@@ -225,6 +338,8 @@ def requested_sim_root_contract(config: dict[str, object]) -> dict[str, object]:
             "algorithm": ALGORITHM_VERSION,
             "software_versions": simulation_software_versions(),
             "map_sha256": str(config["map_sha256"]),
+            "mask_sha256": str(config["mask_sha256"]),
+            "target_policy": TARGET_POLICY,
             "recombination_rate": float(config["recombination_rate"]),
             "initial_rate": float(config["initial_rate"]),
             "retry_rate": float(config["retry_rate"]),
@@ -526,49 +641,101 @@ def make_demography(population: str, times: np.ndarray, ne: np.ndarray) -> mspri
     return demography
 
 
+@functools.lru_cache(maxsize=4)
+def cached_mask_by_chrom(path: str) -> dict[str, np.ndarray]:
+    """Load and merge the external mask once in each simulation process."""
+    chromosomes = tuple(f"chr{index}" for index in range(1, 23))
+    return load_mask(Path(path), chromosomes) if path else load_mask(None, chromosomes)
+
+
 @functools.lru_cache(maxsize=32)
-def cached_map_chrom(path: str, chromosome: str) -> dict[str, object]:
+def cached_map_chrom(path: str, mask_path: str, chromosome: str) -> dict[str, object]:
+    """Read one compact S matrix and reconstruct geometry from the verified mask."""
     chromosome = canonical_chrom(chromosome)
     with h5py.File(path, "r") as handle:
         if str(handle.attrs.get("schema", "")) != SCHEMA:
             raise ValueError(f"{path} is not a current {SCHEMA} map")
+        if not bool(handle.attrs.get("complete", False)):
+            raise ValueError(f"map is not marked complete: {path}")
         window_size = int(handle.attrs["window_size"])
+        populations = [
+            value.decode() if isinstance(value, bytes) else str(value)
+            for value in handle["populations"][...]
+        ]
         group = handle[chromosome]
-        starts = np.asarray(group["window_starts"], dtype=np.int64)
-        ends = np.asarray(group["window_ends"], dtype=np.int64)
-        callable_bp = np.asarray(group["callable_bp"], dtype=np.int64)
-        mask = np.asarray(group["mask_intervals"], dtype=np.int64).reshape(-1, 2)
-        theta = {}
-        for key, value in group.items():
-            if isinstance(value, h5py.Group) and "theta" in value:
-                theta[key.upper()] = np.asarray(value["theta"], dtype=np.int64)
+        length_bp = int(group.attrs["length_bp"])
+        n_windows = int(group.attrs["n_windows"])
+        matrix = np.asarray(group["S"], dtype=np.int64)
+        if matrix.shape != (len(populations), n_windows):
+            raise ValueError(f"invalid S matrix shape for {chromosome}: {matrix.shape}")
+        raw_s = {population.upper(): matrix[index] for index, population in enumerate(populations)}
+        mask = clip_merged_mask(cached_mask_by_chrom(mask_path)[chromosome], length_bp)
+        starts, ends, callable_bp = window_geometry(length_bp, window_size, mask)
+        if len(starts) != n_windows:
+            raise ValueError(f"window count disagrees with chromosome length in {chromosome}")
         result: dict[str, object] = {
             "window_size": window_size,
-            "length_bp": int(group.attrs["length_bp"]),
+            "length_bp": length_bp,
             "starts": starts,
             "ends": ends,
             "callable_bp": callable_bp,
             "mask": mask,
-            "theta": theta,
+            "raw_s": raw_s,
         }
-    if not theta:
+    if not raw_s:
         raise ValueError(f"no population targets in {chromosome}")
-    first_population = next(iter(theta))
+    first_population = next(iter(raw_s))
     ChromosomeTarget(
         chromosome=chromosome,
         population=first_population,
-        length_bp=int(result["length_bp"]),
+        length_bp=length_bp,
         window_size=window_size,
         starts=starts,
         ends=ends,
         callable_bp=callable_bp,
-        theta=theta[first_population],
+        theta=raw_s[first_population],
         mask_intervals=mask,
     ).validate()
-    for population, values in theta.items():
+    for population, values in raw_s.items():
         if values.shape != starts.shape or np.any(values < 0) or np.any(values > callable_bp):
-            raise ValueError(f"invalid theta vector for {population}/{chromosome}")
+            raise ValueError(f"invalid S vector for {population}/{chromosome}")
     return result
+
+
+def runtime_target_from_raw_s(
+    raw_s: np.ndarray,
+    callable_bp: np.ndarray,
+    *,
+    map_a_n: float,
+    simulation_a_n: float,
+) -> tuple[np.ndarray, np.ndarray, float]:
+    """Return target S, theta_W/callable-bp, and the a_n rescaling factor."""
+    raw_s = np.asarray(raw_s, dtype=np.int64)
+    callable_bp = np.asarray(callable_bp, dtype=np.int64)
+    if raw_s.shape != callable_bp.shape or np.any(raw_s < 0) or np.any(raw_s > callable_bp):
+        raise ValueError("raw S must be a valid count for every callable window")
+    if not np.isfinite(map_a_n) or map_a_n <= 0:
+        raise ValueError("map a_n must be finite and positive")
+    if not np.isfinite(simulation_a_n) or simulation_a_n <= 0:
+        raise ValueError("simulation a_n must be finite and positive")
+
+    density = np.zeros(raw_s.shape, dtype=np.float64)
+    available = callable_bp > 0
+    if np.any(raw_s[~available] != 0):
+        raise ValueError("raw S is nonzero in a fully masked window")
+    density[available] = raw_s[available] / (float(map_a_n) * callable_bp[available])
+    scale = float(simulation_a_n) / float(map_a_n)
+    if simulation_a_n == map_a_n:
+        target = raw_s.copy()
+    else:
+        # Round-half-up is explicit and platform-independent for nonnegative S.
+        target = np.floor(raw_s.astype(np.float64) * scale + 0.5).astype(np.int64)
+    if np.any(target > callable_bp):
+        raise ValueError(
+            "sample-size-rescaled target exceeds callable positions; use fewer simulation "
+            "samples or a different target policy"
+        )
+    return target, density, scale
 
 
 def positions_masked(positions: np.ndarray, mask: np.ndarray) -> np.ndarray:
@@ -881,9 +1048,9 @@ def validate_calibrated(
     if not np.allclose(realized, rounded) or not np.array_equal(rounded, target):
         bad = np.flatnonzero(rounded != target)
         preview = [(int(index), int(target[index]), int(rounded[index])) for index in bad[:10]]
-        raise ValueError(f"realized segregating sites do not equal theta: {preview}")
+        raise ValueError(f"realized segregating sites do not equal target S: {preview}")
     if ts.num_sites != int(target.sum()):
-        raise ValueError("site count differs from theta sum despite biallelic validation")
+        raise ValueError("site count differs from target-S sum despite biallelic validation")
 
 
 class TargetDeficit(RuntimeError):
@@ -1030,7 +1197,13 @@ def unit_signature(
     sample_count: int,
     length_bp: int,
     window_size: int,
+    callable_bp: int,
+    source_sites: int,
     target_sites: int,
+    map_sample_count: int,
+    map_a_n: float,
+    simulation_a_n: float,
+    target_scale: float,
 ) -> tuple[str, dict[str, object]]:
     chromosome = canonical_chrom(chromosome)
     base_seed = int(config["base_seed"])
@@ -1048,6 +1221,8 @@ def unit_signature(
         "schema": ALGORITHM_VERSION,
         "software_versions": simulation_software_versions(),
         "map_sha256": config["map_sha256"],
+        "mask_sha256": config["mask_sha256"],
+        "target_policy": TARGET_POLICY,
         "demography_key": config["demography_cache"][population]["key"],
         "population": population,
         "simulation": simulation,
@@ -1055,7 +1230,13 @@ def unit_signature(
         "diploid_samples": sample_count,
         "sequence_length": int(length_bp),
         "window_size": int(window_size),
+        "callable_bp": int(callable_bp),
+        "source_segregating_sites": int(source_sites),
         "target_sites": int(target_sites),
+        "map_diploid_samples": int(map_sample_count),
+        "map_watterson_a_n": float(map_a_n),
+        "simulation_watterson_a_n": float(simulation_a_n),
+        "S_scale": float(target_scale),
         "base_seed": base_seed,
         "recombination_rate": float(config["recombination_rate"]),
         "initial_rate": float(config["initial_rate"]),
@@ -1190,16 +1371,23 @@ def simulate_unit(payload: tuple[dict[str, object], str, int, str]) -> dict[str,
     sidecar = output.with_suffix(output.suffix + ".json")
     lock = output.with_suffix(output.suffix + ".lock")
     try:
-        map_data = cached_map_chrom(str(config["map_path"]), chromosome)
-        theta_by_pop = map_data["theta"]
-        target = np.asarray(theta_by_pop[population], dtype=np.int64)
+        map_data = cached_map_chrom(str(config["map_path"]), str(config["mask_path"]), chromosome)
+        raw_s_by_pop = map_data["raw_s"]
+        raw_s = np.asarray(raw_s_by_pop[population], dtype=np.int64)
         starts = np.asarray(map_data["starts"], dtype=np.int64)
         ends = np.asarray(map_data["ends"], dtype=np.int64)
         callable_bp = np.asarray(map_data["callable_bp"], dtype=np.int64)
         mask = np.asarray(map_data["mask"], dtype=np.int64)
-        if np.any(target > callable_bp):
-            raise ValueError("theta exceeds callable bases")
         sample_count = int(config["sample_counts"][population])
+        map_sample_count = int(config["map_sample_counts"][population])
+        map_a_n = float(config["map_watterson_a_n"][population])
+        simulation_a_n = float(config["simulation_watterson_a_n"][population])
+        target, effective_density, target_scale = runtime_target_from_raw_s(
+            raw_s,
+            callable_bp,
+            map_a_n=map_a_n,
+            simulation_a_n=simulation_a_n,
+        )
         signature, contract = unit_signature(
             config=config,
             population=population,
@@ -1208,7 +1396,13 @@ def simulate_unit(payload: tuple[dict[str, object], str, int, str]) -> dict[str,
             sample_count=sample_count,
             length_bp=int(map_data["length_bp"]),
             window_size=int(map_data["window_size"]),
+            callable_bp=int(callable_bp.sum()),
+            source_sites=int(raw_s.sum()),
             target_sites=int(target.sum()),
+            map_sample_count=map_sample_count,
+            map_a_n=map_a_n,
+            simulation_a_n=simulation_a_n,
+            target_scale=target_scale,
         )
         with output_lock(lock):
             if not config["fresh"] and existing_complete(
@@ -1262,8 +1456,26 @@ def simulate_unit(payload: tuple[dict[str, object], str, int, str]) -> dict[str,
                 "status": "complete",
                 "signature": signature,
                 "contract": contract,
+                "source_segregating_sites": int(raw_s.sum()),
                 "target_sites": int(target.sum()),
                 "realized_sites": int(calibrated.num_sites),
+                "callable_bp": int(callable_bp.sum()),
+                "effective_theta_w_per_callable_bp": {
+                    "definition": "S / (map_watterson_a_n * callable_bp)",
+                    "genomewide": (
+                        float(raw_s.sum()) / (map_a_n * float(callable_bp.sum()))
+                        if callable_bp.sum()
+                        else 0.0
+                    ),
+                    "minimum_nonzero": (
+                        float(effective_density[effective_density > 0].min())
+                        if np.any(effective_density > 0)
+                        else 0.0
+                    ),
+                    "maximum": float(effective_density.max(initial=0.0)),
+                    "nonzero_windows": int(np.count_nonzero(effective_density)),
+                    "available_windows": int(np.count_nonzero(callable_bp)),
+                },
                 "size_bytes": output.stat().st_size,
                 "seconds": time.monotonic() - started,
                 **stats,
@@ -1346,12 +1558,38 @@ def parser() -> argparse.ArgumentParser:
         default=None,
         help="Local immutable map cache (default: <demography-cache>/map_snapshots)",
     )
+    result.add_argument(
+        "--mask",
+        default=None,
+        help=(
+            "Hard-mask BED/BED.gz path or gs:// URI. Default: the source recorded in the map; "
+            "the content SHA256 must match the map contract"
+        ),
+    )
+    result.add_argument(
+        "--mask-cache-dir",
+        type=Path,
+        default=None,
+        help="Local content-addressed mask cache (default: <demography-cache>/mask_snapshots)",
+    )
+    result.add_argument("--gcloud", default="gcloud")
+    result.add_argument("--billing-project", default=None)
     result.add_argument("--mvn-dir", type=Path, default=Path("mvn"))
     result.add_argument(
         "--demography-cache", "--demog-dir", type=Path, default=Path("demographies")
     )
     result.add_argument("--sim-dir", type=Path, default=Path("sims"))
     result.add_argument("--n-sims", type=int, default=1_000)
+    result.add_argument(
+        "--samples-per-population",
+        "--samples-per-pop",
+        type=int,
+        default=0,
+        help=(
+            "Diploid simulation samples per selected population; 0 uses each map sample count. "
+            "A nonzero override rescales S by the ratio of Watterson a_n values"
+        ),
+    )
     result.add_argument("--pops", default=",".join(DEFAULT_POPS))
     result.add_argument("--chroms", default="1-22")
     result.add_argument("--workers", type=int, default=4)
@@ -1389,6 +1627,8 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"--max-retries must not exceed {SEED_CHANNELS - 3}")
     if args.base_seed < 0:
         raise SystemExit("--base-seed must be nonnegative")
+    if args.samples_per_population < 0:
+        raise SystemExit("--samples-per-population must be nonnegative")
     map_source = args.map_path.expanduser().resolve()
     if not map_source.is_file():
         raise SystemExit(f"map does not exist: {map_source}; run generate_map.py first")
@@ -1411,9 +1651,29 @@ def main(argv: list[str] | None = None) -> int:
             )
         if not complete:
             raise SystemExit("map is not marked complete")
-    counts = map_sample_counts(map_path)
+        mask_source = str(args.mask or handle.attrs.get("hardmask_source", "")).strip()
+        mask_sha256 = str(handle.attrs.get("hardmask_sha256", "")).strip()
+    if not mask_source:
+        raise SystemExit("map has no hardmask source; regenerate it with generate_map.py")
+    mask_cache_directory = (
+        args.mask_cache_dir.expanduser().resolve()
+        if args.mask_cache_dir is not None
+        else args.demography_cache.expanduser().resolve() / "mask_snapshots"
+    )
+    try:
+        mask_snapshot = snapshot_mask(
+            mask_source,
+            mask_cache_directory,
+            expected_sha256=mask_sha256,
+            gcloud=args.gcloud,
+            billing_project=args.billing_project,
+        )
+    except Exception as error:
+        raise SystemExit(f"could not localize and verify mask {mask_source}: {error}") from error
+    map_counts = map_sample_counts(map_path)
+    map_a_n = map_watterson_a_n(map_path)
     populations = [part.strip().upper() for part in args.pops.split(",") if part.strip()]
-    unknown = [pop for pop in populations if pop not in DEFAULT_POPS or pop not in counts]
+    unknown = [pop for pop in populations if pop not in DEFAULT_POPS or pop not in map_counts]
     if unknown or len(set(populations)) != len(populations):
         raise SystemExit(f"invalid, duplicate, or absent populations: {unknown or populations}")
     chromosomes = parse_chroms(args.chroms)
@@ -1426,8 +1686,14 @@ def main(argv: list[str] | None = None) -> int:
         terminal_stream[0],
         terminal_stream[1],
     )
+    simulation_counts = {pop: args.samples_per_population or map_counts[pop] for pop in populations}
+    simulation_a_n = {pop: watterson_a_n(simulation_counts[pop]) for pop in populations}
     for chromosome in chromosomes:
-        cached_map_chrom(str(map_path), chromosome)
+        cached_map_chrom(
+            str(map_path),
+            str(mask_snapshot.path) if mask_snapshot.path is not None else "",
+            chromosome,
+        )
 
     demography_cache = prepare_demography_cache(
         args.demography_cache.expanduser().resolve(),
@@ -1440,9 +1706,15 @@ def main(argv: list[str] | None = None) -> int:
     config: dict[str, object] = {
         "map_path": str(map_path),
         "map_sha256": map_snapshot.sha256,
+        "mask_path": str(mask_snapshot.path) if mask_snapshot.path is not None else "",
+        "mask_source": mask_snapshot.source,
+        "mask_sha256": mask_snapshot.sha256,
         "sim_dir": str(args.sim_dir.expanduser().resolve()),
         "demography_cache": demography_cache,
-        "sample_counts": {pop: counts[pop] for pop in populations},
+        "map_sample_counts": {pop: map_counts[pop] for pop in populations},
+        "map_watterson_a_n": {pop: map_a_n[pop] for pop in populations},
+        "sample_counts": simulation_counts,
+        "simulation_watterson_a_n": simulation_a_n,
         "base_seed": args.base_seed,
         "recombination_rate": args.recombination_rate,
         "initial_rate": args.initial_rate,
@@ -1459,12 +1731,19 @@ def main(argv: list[str] | None = None) -> int:
     max_pending = args.max_pending or 2 * args.workers
     if max_pending < args.workers:
         raise SystemExit("--max-pending must be zero or at least --workers")
+    scale_summary = ", ".join(
+        f"{pop}: {simulation_a_n[pop] / map_a_n[pop]:.6g}" for pop in populations
+    )
     print(
         f"map_source={map_source}\n"
         f"map_snapshot={map_path} sha256={map_snapshot.sha256} "
         f"bytes={map_snapshot.size_bytes:,}\n"
+        f"mask={mask_snapshot.source} sha256={mask_snapshot.sha256} "
+        f"local={mask_snapshot.path or 'NONE'}\n"
         f"simulation_contract={sim_root_contract}\n"
-        f"pops={populations} samples={config['sample_counts']} chroms={chromosomes}\n"
+        f"pops={populations} map_samples={config['map_sample_counts']} "
+        f"simulation_samples={config['sample_counts']} chroms={chromosomes}\n"
+        f"S_scales={{{scale_summary}}}\n"
         f"units={total:,} workers={args.workers} max_pending={max_pending} "
         f"mu={args.initial_rate:g} retry_mu={args.retry_rate:g} retries={args.max_retries}",
         flush=True,
