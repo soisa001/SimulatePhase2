@@ -51,6 +51,8 @@ def write_completed_unit(root: Path, simulation: int) -> None:
         "status": "complete",
         "signature": signature,
         "size_bytes": output.stat().st_size,
+        "target_sites": ts.num_sites,
+        "realized_sites": ts.num_sites,
         "contract": {
             "population": "AFR",
             "simulation": simulation,

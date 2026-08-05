@@ -60,6 +60,7 @@ from phase2_map import (
     watterson_a_n,
     window_geometry,
 )
+from simulation_outputs import quick_tsz_archive
 
 DEFAULT_RECOMBINATION_RATE = 1e-8
 DEFAULT_INITIAL_RATE = 5e-8
@@ -1383,6 +1384,7 @@ def existing_complete(
         )
     except Exception:
         return False
+    quick = quick and quick_tsz_archive(output)
     return quick and (
         not verify
         or deep_validate_file(
@@ -1484,6 +1486,8 @@ def simulate_unit(payload: tuple[dict[str, object], str, int, str]) -> dict[str,
             temporary = output.with_name(f".{output.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
             try:
                 tszip.compress(calibrated, str(temporary))
+                if not quick_tsz_archive(temporary):
+                    raise RuntimeError(f"TSZip publication check failed: {temporary}")
                 with temporary.open("r+b") as handle:
                     os.fsync(handle.fileno())
                 os.replace(temporary, output)

@@ -1,6 +1,6 @@
 # SimulatePhase2
 
-This repository has four separate, restartable stages:
+This repository has five separate, restartable stages:
 
 1. `generate_map.py` measures the empirical number of segregating biallelic
    SNV positions (`S`) in each 10 kb window and population.
@@ -11,6 +11,9 @@ This repository has four separate, restartable stages:
    biallelic, segregating sites in every window.
 4. `generate_cutoffs.py` reduces the completed tree-sequence nulls to compact
    10 kb recent-coalescence cutoff arrays.
+5. `generate_cutoff_gamma_smc.py` optionally runs the empirical Gamma-SMC
+   within-individual decoder on every completed null and reduces its posterior
+   statistic to matching 10 kb cutoff arrays.
 
 The stored value is therefore the **raw, sample-count- and callability-specific
 segregating-site count `S`**, not conventional population-genetic theta and not
@@ -235,8 +238,18 @@ can still differ because the ZIP/Zarr container records its own metadata.
 
 The small `.tsz.json` completion manifest contains the same map, demography,
 seed, rate, and sample-count signature. Normal resume checks these signatures
-without decompressing every output; add `--verify-existing` for a full
-exact-count revalidation of existing files.
+without decompressing every output. It also opens each TSZip ZIP central
+directory, so an interrupted/truncated archive is regenerated even if a stale
+sidecar happens to exist. Add `--verify-existing` for a full exact-count
+revalidation of existing files.
+
+To audit all expected units explicitly before a reduction phase:
+
+```bash
+uv run python -u check_sim_completeness.py \
+  --sim-dir /scratch.global/soisa001/sims \
+  --pops AFR,EUR,AMR,SAS,MID,EAS --chroms 1-22 --n-sims 1000
+```
 
 ## Generate compact 10 kb TMRCA cutoffs
 
@@ -272,6 +285,67 @@ do not call the truth cutoff a calibrated empirical Gamma-SMC cutoff without a
 matched decode of the simulated data or a separate validation showing that the
 two statistics are interchangeable. The HDF5 records this distinction in
 `source_kind` and `statistic` metadata.
+
+## Generate empirical-method Gamma-SMC cutoffs
+
+Gamma-SMC consumes the simulation `.tsz` files directly with
+`--input-format tsz`; its native entry point loads them with `tszip.load` and
+uses the diploid individuals already stored by msprime. No persistent VCF copy
+is written by this workflow.
+
+```bash
+uv run python -u generate_cutoff_gamma_smc.py \
+  --sim-dir /scratch.global/soisa001/sims \
+  --pops AFR,EUR,AMR,SAS,MID,EAS --chroms 1-22 --n-sims 1000 \
+  --hardmask "$HOME/hardmask.hg38.v4.over99.bed" \
+  --gamma-smc-repo "$HOME/gamma_smc_ts" \
+  --p-values 0.01,0.05 --decode-workers 4 --decode-threads 1
+```
+
+The default decoder contract is the empirical scan contract: fixed
+`theta=0.00075`, `rho/theta=0.8`, `mu=1.29e-8`, 4,500 years at 25 years per
+generation, `--only_within`, `--recent-call mean`, no heterozygous-site output,
+and one output position every 10 kb. The statistic is
+`mean_p_tmrca_lt_threshold`, the mean posterior probability across one homolog
+pair per diploid. The simulation hardmask contains excluded intervals, whereas
+Gamma-SMC expects callable intervals; the script verifies the hardmask SHA256
+against `simulation_contract.json` and writes its per-chromosome complement.
+
+Each successful decode is immediately reduced from TSV to a compressed
+restart profile. Once a chromosome's HDF5 group is atomically complete, those
+profiles are deleted by default; use `--keep-profiles` for diagnostics. A
+restart skips compatible chromosome groups or reuses profiles left by an
+interrupted chromosome. The final files are
+`<sim-dir>/<pop>/gamma_smc_cutoffs.10kb.h5` and record the binary/interface
+hashes, decoder parameters, mask provenance, null summaries, and conservative
+plus-one Monte Carlo cutoffs.
+
+This is substantially more expensive than the tree-truth compact reducer:
+1,000 whole-autosome decodes for each of six populations means 132,000 decoder
+invocations. The overall runner therefore defaults to `compact`; use
+`--cutoff-mode gamma-smc` or `both` intentionally.
+
+## Run all phases
+
+`run_full_simulation.py` writes a separate timestamped provenance log per phase
+under `<sim-dir>/logs`. Every phase is independently callable and idempotent;
+simulation is followed by the quick completeness audit, and a cutoff-only run
+performs the audit before reading any nulls.
+
+```bash
+uv run python -u run_full_simulation.py --phase demography \
+  --mvn-dir mvn --sim-dir /scratch.global/soisa001/sims
+uv run python -u run_full_simulation.py --phase simulate \
+  --map "$HOME/snv_theta_map.10kb.h5" \
+  --mask "$HOME/hardmask.hg38.v4.over99.bed" \
+  --mvn-dir mvn --sim-dir /scratch.global/soisa001/sims
+uv run python -u run_full_simulation.py --phase cutoffs \
+  --cutoff-mode compact --sim-dir /scratch.global/soisa001/sims
+```
+
+Use `--phase all` for the same sequence in one invocation. For empirical-method
+cutoffs, set `--cutoff-mode gamma-smc --gamma-smc-repo "$HOME/gamma_smc_ts"`
+and pass the same localized `--mask` used for simulation.
 
 ## Plot completed simulations
 

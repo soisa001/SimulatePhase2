@@ -22,13 +22,14 @@ import h5py
 import numpy as np
 import tszip
 
-from phase2_map import DEFAULT_POPS, canonical_chrom, parse_chroms
+from phase2_map import DEFAULT_POPS, parse_chroms
 from run_sim import (
     DEFAULT_SIM_DIR,
     SIM_ROOT_CONTRACT_NAME,
     SIM_ROOT_CONTRACT_SCHEMA,
     output_lock,
 )
+from simulation_outputs import completed_units
 
 CUTOFF_SCHEMA = "simulatephase2.tmrca-cutoffs/v1"
 DEFAULT_WINDOW_SIZE = 10_000
@@ -69,48 +70,6 @@ def load_population_contract(sim_dir: Path, population: str) -> tuple[dict[str, 
         raise ValueError(f"simulation contract has no {population} entry: {path}")
     selected = {"global": global_contract, "population": population_contract}
     return selected, json_digest(selected)
-
-
-def completed_units(
-    sim_dir: Path,
-    population: str,
-    chromosome: str,
-    n_sims: int,
-) -> tuple[list[Path], str]:
-    chromosome = canonical_chrom(chromosome)
-    paths: list[Path] = []
-    digest = hashlib.sha256()
-    for simulation in range(n_sims):
-        path = (
-            sim_dir
-            / population.lower()
-            / f"sim_{simulation:05d}"
-            / f"{chromosome}.tsz"
-        )
-        sidecar = path.with_suffix(path.suffix + ".json")
-        if not path.is_file() or not sidecar.is_file():
-            raise FileNotFoundError(f"missing completed simulation unit: {path}")
-        try:
-            metadata = json.loads(sidecar.read_text(encoding="utf-8"))
-        except Exception as error:
-            raise ValueError(f"cannot read completion sidecar {sidecar}: {error}") from error
-        contract = metadata.get("contract")
-        valid = (
-            metadata.get("status") == "complete"
-            and isinstance(contract, dict)
-            and contract.get("population") == population
-            and int(contract.get("simulation", -1)) == simulation
-            and canonical_chrom(str(contract.get("chromosome", ""))) == chromosome
-            and int(metadata.get("size_bytes", -1)) == path.stat().st_size
-            and isinstance(metadata.get("signature"), str)
-        )
-        if not valid:
-            raise ValueError(f"invalid or stale completion sidecar: {sidecar}")
-        digest.update(
-            f"{simulation}\t{metadata['signature']}\t{metadata['size_bytes']}\n".encode()
-        )
-        paths.append(path)
-    return paths, digest.hexdigest()
 
 
 def window_breaks(sequence_length: float, window_size: int) -> np.ndarray:
