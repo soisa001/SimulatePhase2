@@ -64,6 +64,9 @@ from phase2_map import (
 DEFAULT_RECOMBINATION_RATE = 1e-8
 DEFAULT_INITIAL_RATE = 5e-8
 DEFAULT_RETRY_RATE = 1e-7
+DEFAULT_SIM_DIR = Path("/scratch.global/soisa001/sims")
+DEFAULT_DEMOGRAPHY_CACHE = DEFAULT_SIM_DIR / "demographies"
+DEFAULT_DEMOGRAPHY_EPOCHS = 10_000
 ALGORITHM_VERSION = "simulatephase2.calibrated-snv/v5-runtime-mask"
 DETERMINISTIC_PROVENANCE_TIMESTAMP = "1970-01-01T00:00:00Z"
 SIM_ROOT_CONTRACT_SCHEMA = "simulatephase2.sim-root-contract/v2"
@@ -505,11 +508,19 @@ def load_mvn_draws(
             times = np.asarray(data["time"], dtype=float)
             mean = np.asarray(data["mean_log_ne"], dtype=float)
             factor = np.asarray(data["covariance_factor"], dtype=float)
-            if factor.ndim != 2 or factor.shape[1] != len(mean):
+            if mean.ndim != 1 or not np.isfinite(mean).all():
+                raise ValueError(f"invalid mean_log_ne in {path}")
+            if (
+                factor.ndim != 2
+                or factor.shape[1] != len(mean)
+                or not np.isfinite(factor).all()
+            ):
                 raise ValueError(f"invalid covariance factor in {path}")
             latent = rng.standard_normal((n_sims, factor.shape[0]))
             log_ne = mean + latent @ factor
             jitter = float(data["jitter"]) if "jitter" in files else 0.0
+            if not np.isfinite(jitter) or jitter < 0.0:
+                raise ValueError(f"invalid MVN jitter in {path}")
             if jitter:
                 log_ne += rng.normal(0.0, jitter, size=log_ne.shape)
             source_schema = str(data["schema"]) if "schema" in files else "low-rank"
@@ -540,7 +551,13 @@ def load_mvn_draws(
             rank = factor.shape[0]
         else:
             raise ValueError(f"unrecognized MVN schema in {path}: {sorted(files)}")
-    if len(times) != log_ne.shape[1] or np.any(np.diff(times) <= 0):
+    if (
+        times.ndim != 1
+        or len(times) != log_ne.shape[1]
+        or not np.isfinite(times).all()
+        or times[0] <= 0.0
+        or np.any(np.diff(times) <= 0)
+    ):
         raise ValueError(f"invalid MVN time grid in {path}")
     indices = coarsen_indices(times, epochs)
     ne = np.exp(log_ne[:, indices])
@@ -585,38 +602,46 @@ def prepare_demography_cache(
             ).encode()
         ).hexdigest()
         output = directory / f"{population.upper()}.{key[:20]}.npz"
-        valid = False
-        if output.is_file():
-            try:
-                with np.load(output, allow_pickle=False) as cached:
-                    valid = str(cached["cache_key"]) == key and cached["ne"].shape[0] >= n_sims
-            except Exception:
-                valid = False
-        if not valid:
-            print(f"[demography] drawing {n_sims:,} {population} histories", flush=True)
-            times, ne, metadata = load_mvn_draws(
-                source,
-                population=population,
-                n_sims=n_sims,
-                epochs=epochs,
-                seed=seed,
-            )
-            temporary = output.with_name(f".{output.name}.{os.getpid()}.tmp")
-            try:
-                with temporary.open("wb") as handle:
-                    np.savez_compressed(
-                        handle,
-                        cache_key=np.asarray(key),
-                        population=np.asarray(population.upper()),
-                        times=times.astype(np.float64),
-                        ne=ne.astype(np.float32),
-                        metadata_json=np.asarray(json.dumps(metadata, sort_keys=True)),
-                    )
-                    handle.flush()
-                    os.fsync(handle.fileno())
-                os.replace(temporary, output)
-            finally:
-                temporary.unlink(missing_ok=True)
+        lock = output.with_suffix(output.suffix + ".lock")
+        with output_lock(lock):
+            valid = False
+            if output.is_file():
+                try:
+                    with np.load(output, allow_pickle=False) as cached:
+                        valid = (
+                            str(cached["cache_key"]) == key
+                            and str(cached["population"]) == population.upper()
+                            and cached["ne"].shape[0] == n_sims
+                            and cached["ne"].ndim == 2
+                            and cached["times"].shape == (cached["ne"].shape[1],)
+                        )
+                except Exception:
+                    valid = False
+            if not valid:
+                print(f"[demography] drawing {n_sims:,} {population} histories", flush=True)
+                times, ne, metadata = load_mvn_draws(
+                    source,
+                    population=population,
+                    n_sims=n_sims,
+                    epochs=epochs,
+                    seed=seed,
+                )
+                temporary = output.with_name(f".{output.name}.{os.getpid()}.tmp")
+                try:
+                    with temporary.open("wb") as handle:
+                        np.savez_compressed(
+                            handle,
+                            cache_key=np.asarray(key),
+                            population=np.asarray(population.upper()),
+                            times=times.astype(np.float64),
+                            ne=ne.astype(np.float32),
+                            metadata_json=np.asarray(json.dumps(metadata, sort_keys=True)),
+                        )
+                        handle.flush()
+                        os.fsync(handle.fileno())
+                    os.replace(temporary, output)
+                finally:
+                    temporary.unlink(missing_ok=True)
         result[population.upper()] = {"path": str(output.resolve()), "key": key}
         print(f"[demography] {population}: {output}", flush=True)
     return result
@@ -627,7 +652,19 @@ def cached_demographies(path: str, expected_key: str) -> tuple[np.ndarray, np.nd
     with np.load(path, allow_pickle=False) as data:
         if str(data["cache_key"]) != expected_key:
             raise ValueError(f"demography cache key mismatch: {path}")
-        return np.asarray(data["times"], dtype=float), np.asarray(data["ne"], dtype=float)
+        times = np.asarray(data["times"], dtype=float)
+        ne = np.asarray(data["ne"], dtype=float)
+    if (
+        times.ndim != 1
+        or ne.ndim != 2
+        or ne.shape[1] != len(times)
+        or not np.isfinite(times).all()
+        or not np.isfinite(ne).all()
+        or np.any(np.diff(times) <= 0.0)
+        or np.any(ne <= 0.0)
+    ):
+        raise ValueError(f"invalid demography cache contents: {path}")
+    return times, ne
 
 
 def make_demography(population: str, times: np.ndarray, ne: np.ndarray) -> msprime.Demography:
@@ -1576,9 +1613,9 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--billing-project", default=None)
     result.add_argument("--mvn-dir", type=Path, default=Path("mvn"))
     result.add_argument(
-        "--demography-cache", "--demog-dir", type=Path, default=Path("demographies")
+        "--demography-cache", "--demog-dir", type=Path, default=DEFAULT_DEMOGRAPHY_CACHE
     )
-    result.add_argument("--sim-dir", type=Path, default=Path("sims"))
+    result.add_argument("--sim-dir", type=Path, default=DEFAULT_SIM_DIR)
     result.add_argument("--n-sims", type=int, default=1_000)
     result.add_argument(
         "--samples-per-population",
@@ -1595,7 +1632,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--workers", type=int, default=4)
     result.add_argument("--max-pending", type=int, default=0, help="Default: twice --workers")
     result.add_argument("--max-tasks-per-worker", type=int, default=0)
-    result.add_argument("--demography-epochs", type=int, default=1_000)
+    result.add_argument("--demography-epochs", type=int, default=DEFAULT_DEMOGRAPHY_EPOCHS)
     result.add_argument("--recombination-rate", type=float, default=DEFAULT_RECOMBINATION_RATE)
     result.add_argument("--initial-rate", type=float, default=DEFAULT_INITIAL_RATE)
     result.add_argument("--retry-rate", type=float, default=DEFAULT_RETRY_RATE)

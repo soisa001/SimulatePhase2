@@ -13,6 +13,7 @@ import pytest
 import tskit
 import tszip
 
+import prepare_demographies
 import run_sim
 from phase2_map import SCHEMA, watterson_a_n
 
@@ -90,6 +91,57 @@ def test_demography_coarsening_has_exact_requested_size() -> None:
     assert len(indices) == 64
     assert indices[0] == 0 and indices[-1] == 999
     assert np.all(np.diff(indices) > 0)
+
+
+def test_simulation_defaults_use_full_mvn_grid_and_scratch_root() -> None:
+    args = run_sim.parser().parse_args([])
+    assert args.n_sims == 1_000
+    assert args.demography_epochs == 10_000
+    assert args.base_seed == 42
+    assert args.sim_dir == Path("/scratch.global/soisa001/sims")
+    assert args.demography_cache == Path("/scratch.global/soisa001/sims/demographies")
+    cache_args = prepare_demographies.parser().parse_args([])
+    assert cache_args.n_sims == 1_000
+    assert cache_args.demography_epochs == 10_000
+    assert cache_args.base_seed == 42
+    assert cache_args.demography_cache == Path("/scratch.global/soisa001/sims/demographies")
+
+
+def test_low_rank_10000_point_mvn_draws_are_seeded_and_cached(tmp_path: Path) -> None:
+    mvn_dir = tmp_path / "mvn"
+    mvn_dir.mkdir()
+    times = np.geomspace(100.0, 40_000.0, 10_000)
+    mean = np.log(np.geomspace(8_000.0, 20_000.0, len(times)))
+    factor = np.vstack(
+        [
+            np.full(len(times), 0.03),
+            np.linspace(-0.02, 0.02, len(times)),
+        ]
+    )
+    np.savez_compressed(
+        mvn_dir / "AFR.npz",
+        schema=np.asarray("phlash.aou.log-ne-mvn/v1"),
+        population=np.asarray("AFR"),
+        time=times.astype(np.float32),
+        mean_log_ne=mean.astype(np.float32),
+        covariance_factor=factor.astype(np.float32),
+        jitter=np.asarray(0.0, dtype=np.float32),
+    )
+    cache_dir = tmp_path / "cache"
+    first = run_sim.prepare_demography_cache(
+        cache_dir, mvn_dir, ["AFR"], n_sims=20, epochs=10_000, seed=42
+    )
+    second = run_sim.prepare_demography_cache(
+        cache_dir, mvn_dir, ["AFR"], n_sims=20, epochs=10_000, seed=42
+    )
+    assert second == first
+    cached_times, cached_ne = run_sim.cached_demographies(
+        first["AFR"]["path"], first["AFR"]["key"]
+    )
+    assert cached_times.shape == (10_000,)
+    assert cached_ne.shape == (20, 10_000)
+    assert cached_ne.dtype == np.float64
+    assert np.isfinite(cached_ne).all()
 
 
 def test_mask_aware_rate_map() -> None:
