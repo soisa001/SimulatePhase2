@@ -1,0 +1,190 @@
+{
+  "axis_limits": {
+    "diploid_ne": [
+      1000.0,
+      80000.0
+    ],
+    "generations": [
+      100.0,
+      40000.0
+    ]
+  },
+  "base_seed": 42,
+  "combined_plots": {
+    "pdf": {
+      "path": "mvn/plots/all_populations.mvn.pdf",
+      "sha256": "87d541d293842ba06c9b7562c2d774a3753e98eb2470eb0bb66775d2396c2eec"
+    },
+    "png": {
+      "path": "mvn/plots/all_populations.mvn.png",
+      "sha256": "42730e44538ab248752b555b1c71714c0760f324221f699e72c20a284a26ee76"
+    }
+  },
+  "complete": true,
+  "generation_time_years": 25.0,
+  "n_draws_per_population": 1000,
+  "populations": {
+    "AFR": {
+      "artifact": "mvn/AFR.npz",
+      "artifact_sha256": "b7bd5ddb1d7b154d91b9032f8a7fc23103709f12ffeb66123d068f305d636f86",
+      "covariance_factor_rows": 100,
+      "covariance_rank_at_most": 99,
+      "draw_seed": 43,
+      "json_sha256": "3e4f3ecd092e7561d40ec8a8a27e35d2e8e967866287e12788a724ee8b5fad33",
+      "median_ne_range": [
+        12640.302494573876,
+        57754.41774228326
+      ],
+      "plots": {
+        "pdf": {
+          "path": "mvn/plots/AFR.mvn.pdf",
+          "sha256": "6fe1adf0c3497b9c92d5653ed86e2d361f6bb5f8b8e454b3d387a7c85ba35ab2"
+        },
+        "png": {
+          "path": "mvn/plots/AFR.mvn.png",
+          "sha256": "da6abdc8cb2945591957dad8172b4cf32648f1f85d1076406f673a9acc90c472"
+        }
+      },
+      "pointwise_95_percent_ne_range": [
+        11799.760118471711,
+        65576.54607555411
+      ]
+    },
+    "AMR": {
+      "artifact": "mvn/AMR.npz",
+      "artifact_sha256": "ad2839b58fc962293eff733aa0d15ab31d74c61252d0e7cfe9d49a0db319d1c6",
+      "covariance_factor_rows": 100,
+      "covariance_rank_at_most": 99,
+      "draw_seed": 45,
+      "json_sha256": "7609b370b83f31dd24a8bb9f4604ff5b071de34c7af346ae9a8b39b5dadc04fd",
+      "median_ne_range": [
+        4471.936328489415,
+        43325.14284925458
+      ],
+      "plots": {
+        "pdf": {
+          "path": "mvn/plots/AMR.mvn.pdf",
+          "sha256": "0ec8dd4b1441674cb0cde1124cb8a02d2569f19883f02f38bd9ad0c9a2ff6b91"
+        },
+        "png": {
+          "path": "mvn/plots/AMR.mvn.png",
+          "sha256": "704c05728cf65b32b2b04b29248095ee97a740ea7de89972f957ce9a6652a46c"
+        }
+      },
+      "pointwise_95_percent_ne_range": [
+        3758.2237119939223,
+        49365.04310884797
+      ]
+    },
+    "EAS": {
+      "artifact": "mvn/EAS.npz",
+      "artifact_sha256": "a5bdfd843629d48050cd56a84da4d70e356d0339017d3c1f67be646d727db928",
+      "covariance_factor_rows": 100,
+      "covariance_rank_at_most": 99,
+      "draw_seed": 48,
+      "json_sha256": "ee17de91f125a6c20ac8388b84b993c4497875b412461cf3943bf4079a1640d5",
+      "median_ne_range": [
+        3160.5300286176807,
+        38381.0869752254
+      ],
+      "plots": {
+        "pdf": {
+          "path": "mvn/plots/EAS.mvn.pdf",
+          "sha256": "9d854b62619b7a9eb8a7c3a1a9cda25b67cacb7e05d2118a67e5277914a10215"
+        },
+        "png": {
+          "path": "mvn/plots/EAS.mvn.png",
+          "sha256": "9879654ecec9043221d92899164487007531c6d1aceb4e29407a47dcf47f2d05"
+        }
+      },
+      "pointwise_95_percent_ne_range": [
+        2898.21978207236,
+        45692.58046689215
+      ]
+    },
+    "EUR": {
+      "artifact": "mvn/EUR.npz",
+      "artifact_sha256": "515bd29113befdaec3699f24f82861656e35b7f6c9cb2844224ec2cdafef4ac6",
+      "covariance_factor_rows": 100,
+      "covariance_rank_at_most": 99,
+      "draw_seed": 44,
+      "json_sha256": "a42d254960565d8c91487fb7de6e236928d788c1f9ab42c7267a010ff9534642",
+      "median_ne_range": [
+        4124.291378281598,
+        42813.3860311405
+      ],
+      "plots": {
+        "pdf": {
+          "path": "mvn/plots/EUR.mvn.pdf",
+          "sha256": "6e4fedc86a052ee234ddb734c225b2d91ea3527059a545ece6a7347ec800105b"
+        },
+        "png": {
+          "path": "mvn/plots/EUR.mvn.png",
+          "sha256": "8f898eadb3d81b8d4ff7804040b7dbb3dea2afebdbd19f53c43a2d323d3c344b"
+        }
+      },
+      "pointwise_95_percent_ne_range": [
+        3626.0732487108007,
+        52948.4170201256
+      ]
+    },
+    "MID": {
+      "artifact": "mvn/MID.npz",
+      "artifact_sha256": "cc4289d473d0345180afa1f58795598129dd1eaf0c2b3f0aede41fb4fc1d86f7",
+      "covariance_factor_rows": 100,
+      "covariance_rank_at_most": 99,
+      "draw_seed": 47,
+      "json_sha256": "a4e2fc55765829cba347d46dea6d544dfeb224d3d45f9a98f7c67352f8daf3bc",
+      "median_ne_range": [
+        4325.975971872989,
+        36890.63723188186
+      ],
+      "plots": {
+        "pdf": {
+          "path": "mvn/plots/MID.mvn.pdf",
+          "sha256": "c082721f8cea9252924747c4cef8adf5402b5ec05fba50d58282b88679ed0097"
+        },
+        "png": {
+          "path": "mvn/plots/MID.mvn.png",
+          "sha256": "5654b72346ea1b5eea352bea82632b1173f6b96f3826bd7e1e9ce46ff79c9ee6"
+        }
+      },
+      "pointwise_95_percent_ne_range": [
+        3800.8823863887915,
+        41948.59488810386
+      ]
+    },
+    "SAS": {
+      "artifact": "mvn/SAS.npz",
+      "artifact_sha256": "27b0c1ac16145a390e03746a4f4ef9d80ad1ae915699eb06e3f7ebb4214628e6",
+      "covariance_factor_rows": 100,
+      "covariance_rank_at_most": 99,
+      "draw_seed": 46,
+      "json_sha256": "2151417b997905c1e212c6cccef7f0e02bc30f5a8d053d02edc4d8201dfdde5f",
+      "median_ne_range": [
+        4198.288567258627,
+        35686.20937379394
+      ],
+      "plots": {
+        "pdf": {
+          "path": "mvn/plots/SAS.mvn.pdf",
+          "sha256": "ce74abe3d0f673b3d213241895d0552c072422d7d8eabe959f670541ba5cdda6"
+        },
+        "png": {
+          "path": "mvn/plots/SAS.mvn.png",
+          "sha256": "c7ee0615996f8a6f0437257627aca65a14f7d47b292bd139d83b58fa1b557494"
+        }
+      },
+      "pointwise_95_percent_ne_range": [
+        3799.258315618342,
+        46400.59527807577
+      ]
+    }
+  },
+  "schema": "simulatephase2.mvn-plot-summary/v1",
+  "time_grid": {
+    "maximum": 40000.0,
+    "minimum": 100.0,
+    "points": 10000
+  }
+}

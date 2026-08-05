@@ -1,0 +1,515 @@
+{
+  "artifact": "/home/jupyter/phlash_ld/phlash_aou_out/mvn/SAS.npz",
+  "artifact_sha256": "27b0c1ac16145a390e03746a4f4ef9d80ad1ae915699eb06e3f7ebb4214628e6",
+  "artifact_size_bytes": 4086336,
+  "covariance_rank_at_most": 99,
+  "jitter_log_ne_sd": 0.0,
+  "max_time_generations": 40000.0,
+  "min_time_generations": 100.0,
+  "num_fits": 100,
+  "num_time_points": 10000,
+  "population": "SAS",
+  "schema": "phlash.aou.log-ne-mvn/v1",
+  "sources": [
+    {
+      "mtime_ns": 1785629497522983063,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit000.pkl",
+      "size_bytes": 219765
+    },
+    {
+      "mtime_ns": 1785628245924751727,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit001.pkl",
+      "size_bytes": 219765
+    },
+    {
+      "mtime_ns": 1785583341847092500,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit002.pkl",
+      "size_bytes": 219765
+    },
+    {
+      "mtime_ns": 1785653662892753769,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit003.pkl",
+      "size_bytes": 219765
+    },
+    {
+      "mtime_ns": 1785654977873372878,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit004.pkl",
+      "size_bytes": 219765
+    },
+    {
+      "mtime_ns": 1785656229359829959,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit005.pkl",
+      "size_bytes": 219765
+    },
+    {
+      "mtime_ns": 1785652809527088082,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit006.pkl",
+      "size_bytes": 219765
+    },
+    {
+      "mtime_ns": 1785654140122085640,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit007.pkl",
+      "size_bytes": 219765
+    },
+    {
+      "mtime_ns": 1785655470176169460,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit008.pkl",
+      "size_bytes": 219765
+    },
+    {
+      "mtime_ns": 1785656273811504102,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit009.pkl",
+      "size_bytes": 219766
+    },
+    {
+      "mtime_ns": 1785749389582678331,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit010.pkl",
+      "size_bytes": 214652
+    },
+    {
+      "mtime_ns": 1785767034477992434,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit011.pkl",
+      "size_bytes": 214652
+    },
+    {
+      "mtime_ns": 1785758715187401561,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit012.pkl",
+      "size_bytes": 214651
+    },
+    {
+      "mtime_ns": 1785759561623913977,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit013.pkl",
+      "size_bytes": 214651
+    },
+    {
+      "mtime_ns": 1785757865738681275,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit014.pkl",
+      "size_bytes": 214651
+    },
+    {
+      "mtime_ns": 1785754104150354336,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit015.pkl",
+      "size_bytes": 213059
+    },
+    {
+      "mtime_ns": 1785755842325661541,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit016.pkl",
+      "size_bytes": 214651
+    },
+    {
+      "mtime_ns": 1785764209983714142,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit017.pkl",
+      "size_bytes": 213059
+    },
+    {
+      "mtime_ns": 1785751212990214854,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit018.pkl",
+      "size_bytes": 214651
+    },
+    {
+      "mtime_ns": 1785749522088310362,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit019.pkl",
+      "size_bytes": 213059
+    },
+    {
+      "mtime_ns": 1785781313932881193,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit020.pkl",
+      "size_bytes": 213059
+    },
+    {
+      "mtime_ns": 1785756781147880831,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit021.pkl",
+      "size_bytes": 214652
+    },
+    {
+      "mtime_ns": 1785752213354927874,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit022.pkl",
+      "size_bytes": 214652
+    },
+    {
+      "mtime_ns": 1785769926140171132,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit023.pkl",
+      "size_bytes": 214652
+    },
+    {
+      "mtime_ns": 1785761990668430314,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit024.pkl",
+      "size_bytes": 214651
+    },
+    {
+      "mtime_ns": 1785764121415277762,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit025.pkl",
+      "size_bytes": 214651
+    },
+    {
+      "mtime_ns": 1785763137114746040,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit026.pkl",
+      "size_bytes": 214651
+    },
+    {
+      "mtime_ns": 1785757018895153789,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit027.pkl",
+      "size_bytes": 213059
+    },
+    {
+      "mtime_ns": 1785762274511058031,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit028.pkl",
+      "size_bytes": 214651
+    },
+    {
+      "mtime_ns": 1785768566731366859,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit029.pkl",
+      "size_bytes": 214651
+    },
+    {
+      "mtime_ns": 1785753896045230810,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit030.pkl",
+      "size_bytes": 213059
+    },
+    {
+      "mtime_ns": 1785753080951991526,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit031.pkl",
+      "size_bytes": 213059
+    },
+    {
+      "mtime_ns": 1785785081586703001,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit032.pkl",
+      "size_bytes": 213059
+    },
+    {
+      "mtime_ns": 1785761375337715101,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit033.pkl",
+      "size_bytes": 213060
+    },
+    {
+      "mtime_ns": 1785757848078398134,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit034.pkl",
+      "size_bytes": 214652
+    },
+    {
+      "mtime_ns": 1785774464900077887,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit035.pkl",
+      "size_bytes": 214652
+    },
+    {
+      "mtime_ns": 1785766114462126203,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit036.pkl",
+      "size_bytes": 213059
+    },
+    {
+      "mtime_ns": 1785766956275308763,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit037.pkl",
+      "size_bytes": 213059
+    },
+    {
+      "mtime_ns": 1785767921899497338,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit038.pkl",
+      "size_bytes": 214651
+    },
+    {
+      "mtime_ns": 1785761427304491384,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit039.pkl",
+      "size_bytes": 214651
+    },
+    {
+      "mtime_ns": 1785766863349555023,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit040.pkl",
+      "size_bytes": 214651
+    },
+    {
+      "mtime_ns": 1785771834693881952,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit041.pkl",
+      "size_bytes": 214651
+    },
+    {
+      "mtime_ns": 1785756990047057884,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit042.pkl",
+      "size_bytes": 214651
+    },
+    {
+      "mtime_ns": 1785755972304106827,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit043.pkl",
+      "size_bytes": 214651
+    },
+    {
+      "mtime_ns": 1785788626750337136,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit044.pkl",
+      "size_bytes": 214651
+    },
+    {
+      "mtime_ns": 1785764859057883232,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit045.pkl",
+      "size_bytes": 213060
+    },
+    {
+      "mtime_ns": 1785760525490958477,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit046.pkl",
+      "size_bytes": 214652
+    },
+    {
+      "mtime_ns": 1785784375960419496,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit047.pkl",
+      "size_bytes": 213060
+    },
+    {
+      "mtime_ns": 1785769913196230350,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit048.pkl",
+      "size_bytes": 214651
+    },
+    {
+      "mtime_ns": 1785770793904239587,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit049.pkl",
+      "size_bytes": 213059
+    },
+    {
+      "mtime_ns": 1785771638937654803,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit050.pkl",
+      "size_bytes": 214651
+    },
+    {
+      "mtime_ns": 1785764928128902716,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit051.pkl",
+      "size_bytes": 213059
+    },
+    {
+      "mtime_ns": 1785770917503222492,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit052.pkl",
+      "size_bytes": 213059
+    },
+    {
+      "mtime_ns": 1785775189280729609,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit053.pkl",
+      "size_bytes": 213059
+    },
+    {
+      "mtime_ns": 1785759610764485134,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit054.pkl",
+      "size_bytes": 213059
+    },
+    {
+      "mtime_ns": 1785760321107105884,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit055.pkl",
+      "size_bytes": 213059
+    },
+    {
+      "mtime_ns": 1785791741359671482,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit056.pkl",
+      "size_bytes": 211467
+    },
+    {
+      "mtime_ns": 1785772384809863234,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit057.pkl",
+      "size_bytes": 214652
+    },
+    {
+      "mtime_ns": 1785763159825396491,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit058.pkl",
+      "size_bytes": 214652
+    },
+    {
+      "mtime_ns": 1785788098363942016,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit059.pkl",
+      "size_bytes": 214652
+    },
+    {
+      "mtime_ns": 1785774279961635687,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit060.pkl",
+      "size_bytes": 214651
+    },
+    {
+      "mtime_ns": 1785773517652227860,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit061.pkl",
+      "size_bytes": 213059
+    },
+    {
+      "mtime_ns": 1785775293515305954,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit062.pkl",
+      "size_bytes": 213059
+    },
+    {
+      "mtime_ns": 1785768036209806334,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit063.pkl",
+      "size_bytes": 214651
+    },
+    {
+      "mtime_ns": 1785776998371223969,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit064.pkl",
+      "size_bytes": 214651
+    },
+    {
+      "mtime_ns": 1785778099507251290,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit065.pkl",
+      "size_bytes": 214651
+    },
+    {
+      "mtime_ns": 1785762193033136778,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit066.pkl",
+      "size_bytes": 213059
+    },
+    {
+      "mtime_ns": 1785763137854799822,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit067.pkl",
+      "size_bytes": 214651
+    },
+    {
+      "mtime_ns": 1785795214763100916,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit068.pkl",
+      "size_bytes": 214651
+    },
+    {
+      "mtime_ns": 1785776217580473938,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit069.pkl",
+      "size_bytes": 214652
+    },
+    {
+      "mtime_ns": 1785766019619232987,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit070.pkl",
+      "size_bytes": 214652
+    },
+    {
+      "mtime_ns": 1785795124925572516,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit071.pkl",
+      "size_bytes": 213060
+    },
+    {
+      "mtime_ns": 1785778004238327292,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit072.pkl",
+      "size_bytes": 214651
+    },
+    {
+      "mtime_ns": 1785777133115016558,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit073.pkl",
+      "size_bytes": 214651
+    },
+    {
+      "mtime_ns": 1785780816682741501,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit074.pkl",
+      "size_bytes": 213059
+    },
+    {
+      "mtime_ns": 1785772544559477492,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit075.pkl",
+      "size_bytes": 213059
+    },
+    {
+      "mtime_ns": 1785780756137341157,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit076.pkl",
+      "size_bytes": 213059
+    },
+    {
+      "mtime_ns": 1785781499351357382,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit077.pkl",
+      "size_bytes": 214651
+    },
+    {
+      "mtime_ns": 1785768822754975233,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit078.pkl",
+      "size_bytes": 214651
+    },
+    {
+      "mtime_ns": 1785766070464928471,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit079.pkl",
+      "size_bytes": 213059
+    },
+    {
+      "mtime_ns": 1785798638312894240,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit080.pkl",
+      "size_bytes": 213059
+    },
+    {
+      "mtime_ns": 1785778885365367605,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit081.pkl",
+      "size_bytes": 214652
+    },
+    {
+      "mtime_ns": 1785768886503608618,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit082.pkl",
+      "size_bytes": 214652
+    },
+    {
+      "mtime_ns": 1785801216143223410,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit083.pkl",
+      "size_bytes": 214652
+    },
+    {
+      "mtime_ns": 1785781662691228965,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit084.pkl",
+      "size_bytes": 214651
+    },
+    {
+      "mtime_ns": 1785779977498751753,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit085.pkl",
+      "size_bytes": 213059
+    },
+    {
+      "mtime_ns": 1785784322939566072,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit086.pkl",
+      "size_bytes": 214651
+    },
+    {
+      "mtime_ns": 1785776149560529664,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit087.pkl",
+      "size_bytes": 214651
+    },
+    {
+      "mtime_ns": 1785784245879965584,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit088.pkl",
+      "size_bytes": 214651
+    },
+    {
+      "mtime_ns": 1785788613179351040,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit089.pkl",
+      "size_bytes": 214651
+    },
+    {
+      "mtime_ns": 1785771636968511690,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit090.pkl",
+      "size_bytes": 213059
+    },
+    {
+      "mtime_ns": 1785769883290056730,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit091.pkl",
+      "size_bytes": 213059
+    },
+    {
+      "mtime_ns": 1785801206550526285,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit092.pkl",
+      "size_bytes": 213059
+    },
+    {
+      "mtime_ns": 1785782393417335923,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit093.pkl",
+      "size_bytes": 214652
+    },
+    {
+      "mtime_ns": 1785773232942528422,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit094.pkl",
+      "size_bytes": 214652
+    },
+    {
+      "mtime_ns": 1785804932254279889,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit095.pkl",
+      "size_bytes": 213060
+    },
+    {
+      "mtime_ns": 1785786112051595808,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit096.pkl",
+      "size_bytes": 214651
+    },
+    {
+      "mtime_ns": 1785783356932359878,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit097.pkl",
+      "size_bytes": 214651
+    },
+    {
+      "mtime_ns": 1785787767912927301,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit098.pkl",
+      "size_bytes": 213059
+    },
+    {
+      "mtime_ns": 1785778817801456479,
+      "path": "/home/jupyter/phlash_bootstrap_trial_1mb_2000i_200p/bootstrap/fits/SAS/fit099.pkl",
+      "size_bytes": 214651
+    }
+  ]
+}
