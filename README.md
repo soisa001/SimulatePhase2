@@ -149,6 +149,22 @@ uv run python -u plot_mvn_summary.py \
   --mvn-dir mvn --n-draws 1000 --base-seed 42
 ```
 
+The bundle layout, exact low-rank fit, lack of MVN shrinkage, and source-PKL
+sizes are documented in [`mvn/README.md`](mvn/README.md). The 100 source
+posterior-median bootstrap curves per population are retained inside each NPZ,
+which permits a direct empirical-reference check. Reproduce the committed
+signed quantile-error plot (PNG and PDF) and its JSON report with the same
+seeded draw path used by `run_sim.py`:
+
+```bash
+uv run --frozen python -u evaluate_mvn_error.py \
+  --mvn-dir mvn --n-draws 1000 --base-seed 42
+```
+
+This comparison calls the stored bootstrap curves an empirical reference, not
+known biological truth. The report separately records the exact analytic MVN
+marginal error and the finite 1,000-draw simulation error.
+
 Materialize the seeded simulation cache with:
 
 ```bash

@@ -1,0 +1,306 @@
+{
+  "aggregate_seeded_simulation_vs_empirical_reference": {
+    "central_95_endpoint_mean_absolute_error_percent": 3.098926813358047,
+    "central_quantile_multiplicative_error_percent_mean": 1.7432941934529367,
+    "median_maximum_absolute_error_percent": 8.005268075778115,
+    "median_maximum_absolute_error_population": "EAS",
+    "median_maximum_absolute_error_time_generations": 320.16259765625,
+    "median_mean_absolute_error_percent": 1.087275345645011,
+    "median_root_mean_square_error_percent": 1.5233041387677733,
+    "reference_curve_coverage_by_candidate_95_interval": 0.9393325
+  },
+  "base_seed": 42,
+  "complete": true,
+  "definitions": {
+    "analytic_mvn": "Exact pointwise log-normal marginals implied by mean_log_ne and covariance_factor; this isolates Gaussian approximation error.",
+    "central_quantile_error": "At 39 equally spaced quantiles from 0.025 through 0.975, the pointwise root-mean-square log-quantile difference, converted to 100*(exp(error)-1).",
+    "empirical_reference": "The 100 stored posterior-median PHLASH bootstrap Ne curves per population; these are an empirical reference, not known biological truth.",
+    "plot": "Pointwise signed relative errors for the 2.5%, 50%, and 97.5% quantiles: 100*(seeded MVN-draw quantile/reference quantile - 1).",
+    "seeded_simulation": "The same run_sim.load_mvn_draws path, full 10,000 epochs, population seed schedule, and base seed used to prepare production demographies."
+  },
+  "n_draws_per_population": 1000,
+  "plot_axis_signed_error_percent": [
+    -25.0,
+    25.0
+  ],
+  "plots": {
+    "pdf": {
+      "path": "mvn/plots/all_populations.mvn_error.pdf",
+      "sha256": "13f11ee66654cb02e6d9e6ab64f82f1078daeebe76468887460a5ed5f2c43489"
+    },
+    "png": {
+      "path": "mvn/plots/all_populations.mvn_error.png",
+      "sha256": "7d30568084abbbcf9eeb918b46bd0bddea89eaffd6f5fe5f3e04e2a03206e153"
+    }
+  },
+  "populations": {
+    "AFR": {
+      "analytic_mvn_vs_empirical_reference": {
+        "central_95_endpoint_mean_absolute_error_percent": 0.8871123805335672,
+        "lower_2_5_mean_absolute_error_percent": 1.0215674902481002,
+        "median_maximum_absolute_error_percent": 1.791551879054465,
+        "median_maximum_absolute_error_time_generations": 924.6582641601562,
+        "median_mean_absolute_error_percent": 0.3159953983635569,
+        "median_mean_error_percent": 0.044369507969095084,
+        "median_root_mean_square_error_percent": 0.4121997873628565,
+        "upper_97_5_mean_absolute_error_percent": 0.7526572708190342
+      },
+      "artifact": "mvn/AFR.npz",
+      "artifact_sha256": "b7bd5ddb1d7b154d91b9032f8a7fc23103709f12ffeb66123d068f305d636f86",
+      "covariance_factor_shape": [
+        100,
+        10000
+      ],
+      "covariance_rank_at_most": 99,
+      "draw_seed": 43,
+      "empirical_reference_curves": 100,
+      "moment_reconstruction_checks": {
+        "covariance_factor_maximum_absolute_reconstruction_error": 7.204326113105508e-09,
+        "log_mean_maximum_absolute_reconstruction_error": 4.829641380155181e-07
+      },
+      "seeded_simulation_vs_empirical_reference": {
+        "central_95_endpoint_mean_absolute_error_percent": 0.9023864722349754,
+        "central_quantile_log_rmse_mean": 0.005772660337113568,
+        "central_quantile_multiplicative_error_percent_mean": 0.5791145174106992,
+        "lower_2_5_mean_absolute_error_percent": 1.0032664534738394,
+        "median_maximum_absolute_error_percent": 1.9630925673875144,
+        "median_maximum_absolute_error_time_generations": 1650.5384521484375,
+        "median_mean_absolute_error_percent": 0.39764692311614075,
+        "median_mean_error_percent": 0.05321787999537289,
+        "median_root_mean_square_error_percent": 0.5176189332374892,
+        "reference_curve_coverage_by_candidate_95_interval": 0.949485,
+        "upper_97_5_mean_absolute_error_percent": 0.8015064909961113
+      },
+      "sidecar": "mvn/AFR.json",
+      "sidecar_sha256": "3e4f3ecd092e7561d40ec8a8a27e35d2e8e967866287e12788a724ee8b5fad33",
+      "source_pkl_count": 100,
+      "source_pkl_total_bytes": 19123464
+    },
+    "AMR": {
+      "analytic_mvn_vs_empirical_reference": {
+        "central_95_endpoint_mean_absolute_error_percent": 2.493265324057243,
+        "lower_2_5_mean_absolute_error_percent": 2.9754291022167974,
+        "median_maximum_absolute_error_percent": 5.588100945694108,
+        "median_maximum_absolute_error_time_generations": 1133.600830078125,
+        "median_mean_absolute_error_percent": 1.0545503105273608,
+        "median_mean_error_percent": 0.9188238719566171,
+        "median_root_mean_square_error_percent": 1.4538748533323564,
+        "upper_97_5_mean_absolute_error_percent": 2.0111015458976884
+      },
+      "artifact": "mvn/AMR.npz",
+      "artifact_sha256": "ad2839b58fc962293eff733aa0d15ab31d74c61252d0e7cfe9d49a0db319d1c6",
+      "covariance_factor_shape": [
+        100,
+        10000
+      ],
+      "covariance_rank_at_most": 99,
+      "draw_seed": 45,
+      "empirical_reference_curves": 100,
+      "moment_reconstruction_checks": {
+        "covariance_factor_maximum_absolute_reconstruction_error": 8.320191577371183e-09,
+        "log_mean_maximum_absolute_reconstruction_error": 4.80646420442099e-07
+      },
+      "seeded_simulation_vs_empirical_reference": {
+        "central_95_endpoint_mean_absolute_error_percent": 2.6677694188883523,
+        "central_quantile_log_rmse_mean": 0.014349260057642612,
+        "central_quantile_multiplicative_error_percent_mean": 1.450844085640595,
+        "lower_2_5_mean_absolute_error_percent": 3.0710685815299423,
+        "median_maximum_absolute_error_percent": 5.237544457556131,
+        "median_maximum_absolute_error_time_generations": 1133.600830078125,
+        "median_mean_absolute_error_percent": 0.9950317001817037,
+        "median_mean_error_percent": 0.8602474158193986,
+        "median_root_mean_square_error_percent": 1.3650049016912171,
+        "reference_curve_coverage_by_candidate_95_interval": 0.939733,
+        "upper_97_5_mean_absolute_error_percent": 2.2644702562467613
+      },
+      "sidecar": "mvn/AMR.json",
+      "sidecar_sha256": "7609b370b83f31dd24a8bb9f4604ff5b071de34c7af346ae9a8b39b5dadc04fd",
+      "source_pkl_count": 100,
+      "source_pkl_total_bytes": 20278273
+    },
+    "EAS": {
+      "analytic_mvn_vs_empirical_reference": {
+        "central_95_endpoint_mean_absolute_error_percent": 4.074092067597522,
+        "lower_2_5_mean_absolute_error_percent": 4.143909168619833,
+        "median_maximum_absolute_error_percent": 7.7165647070481125,
+        "median_maximum_absolute_error_time_generations": 351.5335388183594,
+        "median_mean_absolute_error_percent": 1.5107606504870301,
+        "median_mean_error_percent": 1.1494165588550735,
+        "median_root_mean_square_error_percent": 2.0248892040155475,
+        "upper_97_5_mean_absolute_error_percent": 4.004274966575209
+      },
+      "artifact": "mvn/EAS.npz",
+      "artifact_sha256": "a5bdfd843629d48050cd56a84da4d70e356d0339017d3c1f67be646d727db928",
+      "covariance_factor_shape": [
+        100,
+        10000
+      ],
+      "covariance_rank_at_most": 99,
+      "draw_seed": 48,
+      "empirical_reference_curves": 100,
+      "moment_reconstruction_checks": {
+        "covariance_factor_maximum_absolute_reconstruction_error": 7.730672282879603e-09,
+        "log_mean_maximum_absolute_reconstruction_error": 4.79855321700029e-07
+      },
+      "seeded_simulation_vs_empirical_reference": {
+        "central_95_endpoint_mean_absolute_error_percent": 4.132542681102078,
+        "central_quantile_log_rmse_mean": 0.02305723469551882,
+        "central_quantile_multiplicative_error_percent_mean": 2.352136390625394,
+        "lower_2_5_mean_absolute_error_percent": 3.932722150000013,
+        "median_maximum_absolute_error_percent": 8.005268075778115,
+        "median_maximum_absolute_error_time_generations": 320.16259765625,
+        "median_mean_absolute_error_percent": 1.7063601107001578,
+        "median_mean_error_percent": 1.3237292686104896,
+        "median_root_mean_square_error_percent": 2.2034600255561823,
+        "reference_curve_coverage_by_candidate_95_interval": 0.935538,
+        "upper_97_5_mean_absolute_error_percent": 4.332363212204143
+      },
+      "sidecar": "mvn/EAS.json",
+      "sidecar_sha256": "ee17de91f125a6c20ac8388b84b993c4497875b412461cf3943bf4079a1640d5",
+      "source_pkl_count": 100,
+      "source_pkl_total_bytes": 21972537
+    },
+    "EUR": {
+      "analytic_mvn_vs_empirical_reference": {
+        "central_95_endpoint_mean_absolute_error_percent": 3.8893540104432223,
+        "lower_2_5_mean_absolute_error_percent": 3.526311304430208,
+        "median_maximum_absolute_error_percent": 7.072647601517468,
+        "median_maximum_absolute_error_time_generations": 261.7776794433594,
+        "median_mean_absolute_error_percent": 1.6874419443493436,
+        "median_mean_error_percent": -0.8363608535000278,
+        "median_root_mean_square_error_percent": 2.115995727206314,
+        "upper_97_5_mean_absolute_error_percent": 4.252396716456236
+      },
+      "artifact": "mvn/EUR.npz",
+      "artifact_sha256": "515bd29113befdaec3699f24f82861656e35b7f6c9cb2844224ec2cdafef4ac6",
+      "covariance_factor_shape": [
+        100,
+        10000
+      ],
+      "covariance_rank_at_most": 99,
+      "draw_seed": 44,
+      "empirical_reference_curves": 100,
+      "moment_reconstruction_checks": {
+        "covariance_factor_maximum_absolute_reconstruction_error": 8.09029467030431e-09,
+        "log_mean_maximum_absolute_reconstruction_error": 4.8049854939336e-07
+      },
+      "seeded_simulation_vs_empirical_reference": {
+        "central_95_endpoint_mean_absolute_error_percent": 4.0551309334276775,
+        "central_quantile_log_rmse_mean": 0.023720463761683654,
+        "central_quantile_multiplicative_error_percent_mean": 2.4146335576656957,
+        "lower_2_5_mean_absolute_error_percent": 3.507017059540833,
+        "median_maximum_absolute_error_percent": 6.7589513426189125,
+        "median_maximum_absolute_error_time_generations": 261.7776794433594,
+        "median_mean_absolute_error_percent": 1.4925153787764132,
+        "median_mean_error_percent": -0.6463036709430218,
+        "median_root_mean_square_error_percent": 1.8749878154795023,
+        "reference_curve_coverage_by_candidate_95_interval": 0.935255,
+        "upper_97_5_mean_absolute_error_percent": 4.603244807314522
+      },
+      "sidecar": "mvn/EUR.json",
+      "sidecar_sha256": "a42d254960565d8c91487fb7de6e236928d788c1f9ab42c7267a010ff9534642",
+      "source_pkl_count": 100,
+      "source_pkl_total_bytes": 21774776
+    },
+    "MID": {
+      "analytic_mvn_vs_empirical_reference": {
+        "central_95_endpoint_mean_absolute_error_percent": 3.188839750077854,
+        "lower_2_5_mean_absolute_error_percent": 3.4867325357366883,
+        "median_maximum_absolute_error_percent": 4.600581341388588,
+        "median_maximum_absolute_error_time_generations": 925.2125244140625,
+        "median_mean_absolute_error_percent": 1.0538699003623828,
+        "median_mean_error_percent": 0.819491553106845,
+        "median_root_mean_square_error_percent": 1.436392862417432,
+        "upper_97_5_mean_absolute_error_percent": 2.890946964419019
+      },
+      "artifact": "mvn/MID.npz",
+      "artifact_sha256": "cc4289d473d0345180afa1f58795598129dd1eaf0c2b3f0aede41fb4fc1d86f7",
+      "covariance_factor_shape": [
+        100,
+        10000
+      ],
+      "covariance_rank_at_most": 99,
+      "draw_seed": 47,
+      "empirical_reference_curves": 100,
+      "moment_reconstruction_checks": {
+        "covariance_factor_maximum_absolute_reconstruction_error": 7.676449448323908e-09,
+        "log_mean_maximum_absolute_reconstruction_error": 4.823143893162296e-07
+      },
+      "seeded_simulation_vs_empirical_reference": {
+        "central_95_endpoint_mean_absolute_error_percent": 3.3160787855376044,
+        "central_quantile_log_rmse_mean": 0.017288870668627495,
+        "central_quantile_multiplicative_error_percent_mean": 1.7534744074769857,
+        "lower_2_5_mean_absolute_error_percent": 3.445002473761054,
+        "median_maximum_absolute_error_percent": 4.647870150222744,
+        "median_maximum_absolute_error_time_generations": 513.06591796875,
+        "median_mean_absolute_error_percent": 0.8689360618241517,
+        "median_mean_error_percent": 0.6230540802877222,
+        "median_root_mean_square_error_percent": 1.19847824396047,
+        "reference_curve_coverage_by_candidate_95_interval": 0.937002,
+        "upper_97_5_mean_absolute_error_percent": 3.187155097314155
+      },
+      "sidecar": "mvn/MID.json",
+      "sidecar_sha256": "a4e2fc55765829cba347d46dea6d544dfeb224d3d45f9a98f7c67352f8daf3bc",
+      "source_pkl_count": 100,
+      "source_pkl_total_bytes": 20808104
+    },
+    "SAS": {
+      "analytic_mvn_vs_empirical_reference": {
+        "central_95_endpoint_mean_absolute_error_percent": 3.4281731668237407,
+        "lower_2_5_mean_absolute_error_percent": 3.4215630790335076,
+        "median_maximum_absolute_error_percent": 4.377580886475685,
+        "median_maximum_absolute_error_time_generations": 433.0395202636719,
+        "median_mean_absolute_error_percent": 1.1770374153561116,
+        "median_mean_error_percent": 0.9700851775795438,
+        "median_root_mean_square_error_percent": 1.546204425790671,
+        "upper_97_5_mean_absolute_error_percent": 3.4347832546139747
+      },
+      "artifact": "mvn/SAS.npz",
+      "artifact_sha256": "27b0c1ac16145a390e03746a4f4ef9d80ad1ae915699eb06e3f7ebb4214628e6",
+      "covariance_factor_shape": [
+        100,
+        10000
+      ],
+      "covariance_rank_at_most": 99,
+      "draw_seed": 46,
+      "empirical_reference_curves": 100,
+      "moment_reconstruction_checks": {
+        "covariance_factor_maximum_absolute_reconstruction_error": 7.799504056493767e-09,
+        "log_mean_maximum_absolute_reconstruction_error": 4.826214965447662e-07
+      },
+      "seeded_simulation_vs_empirical_reference": {
+        "central_95_endpoint_mean_absolute_error_percent": 3.519652588957595,
+        "central_quantile_log_rmse_mean": 0.018795490620626708,
+        "central_quantile_multiplicative_error_percent_mean": 1.9095622018982508,
+        "lower_2_5_mean_absolute_error_percent": 3.2884342432815754,
+        "median_maximum_absolute_error_percent": 3.85233853381155,
+        "median_maximum_absolute_error_time_generations": 10245.958984375,
+        "median_mean_absolute_error_percent": 1.063161899271499,
+        "median_mean_error_percent": 0.836728328000596,
+        "median_root_mean_square_error_percent": 1.4086872469671818,
+        "reference_curve_coverage_by_candidate_95_interval": 0.938982,
+        "upper_97_5_mean_absolute_error_percent": 3.7508709346336144
+      },
+      "sidecar": "mvn/SAS.json",
+      "sidecar_sha256": "2151417b997905c1e212c6cccef7f0e02bc30f5a8d053d02edc4d8201dfdde5f",
+      "source_pkl_count": 100,
+      "source_pkl_total_bytes": 21458952
+    }
+  },
+  "quantiles_plotted": [
+    0.025,
+    0.5,
+    0.975
+  ],
+  "schema": "simulatephase2.mvn-error/v1",
+  "source_pkl_manifest": {
+    "count": 600,
+    "total_bytes": 125416106
+  },
+  "time_grid": {
+    "maximum_generations": 40000.0,
+    "minimum_generations": 100.0,
+    "points": 10000,
+    "sha256_float64": "c721cc07c15909e17b68b22a18c292bf53faffec636b82663e7673c1be380dac"
+  }
+}
