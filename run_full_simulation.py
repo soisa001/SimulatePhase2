@@ -12,7 +12,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-from phase2_map import DEFAULT_POPS
+from phase2_map import (
+    DEFAULT_GAMMA_SMC_REPO,
+    DEFAULT_HARDMASK_PATH,
+    DEFAULT_MAP_PATH,
+    DEFAULT_MVN_DIR,
+    DEFAULT_POPS,
+)
 from run_sim import DEFAULT_DEMOGRAPHY_CACHE, DEFAULT_SIM_DIR
 
 
@@ -26,9 +32,9 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument(
         "--cutoff-mode", choices=("compact", "gamma-smc", "both"), default="compact"
     )
-    result.add_argument("--map", type=Path, default=Path("data/snv_theta_map.10kb.h5"))
-    result.add_argument("--mask", default=None)
-    result.add_argument("--mvn-dir", type=Path, default=Path("mvn"))
+    result.add_argument("--map", type=Path, default=DEFAULT_MAP_PATH)
+    result.add_argument("--mask", type=Path, default=DEFAULT_HARDMASK_PATH)
+    result.add_argument("--mvn-dir", type=Path, default=DEFAULT_MVN_DIR)
     result.add_argument("--demography-cache", type=Path, default=DEFAULT_DEMOGRAPHY_CACHE)
     result.add_argument("--sim-dir", type=Path, default=DEFAULT_SIM_DIR)
     result.add_argument("--pops", default=",".join(DEFAULT_POPS))
@@ -43,7 +49,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--window-size", type=int, default=10_000)
     result.add_argument("--threshold-years", type=float, default=4_500.0)
     result.add_argument("--generation-time", type=float, default=25.0)
-    result.add_argument("--gamma-smc-repo", type=Path, default=Path("../gamma_smc_ts"))
+    result.add_argument("--gamma-smc-repo", type=Path, default=DEFAULT_GAMMA_SMC_REPO)
     result.add_argument("--decode-workers", type=int, default=4)
     result.add_argument("--decode-threads", type=int, default=1)
     result.add_argument("--theta", type=float, default=0.00075)
@@ -105,7 +111,7 @@ def phase_commands(args: argparse.Namespace, executable: str) -> list[tuple[str,
         str(args.max_pending),
     ]
     if args.mask:
-        simulate.extend(["--mask", args.mask])
+        simulate.extend(["--mask", str(args.mask)])
     if args.billing_project:
         simulate.extend(["--billing-project", args.billing_project])
     completeness = [
@@ -175,7 +181,7 @@ def phase_commands(args: argparse.Namespace, executable: str) -> list[tuple[str,
             raise ValueError(
                 "Gamma-SMC cutoff mode requires --mask to be a localized BED/BED.gz path"
             )
-        gamma.extend(["--hardmask", args.mask])
+        gamma.extend(["--hardmask", str(args.mask)])
     if args.keep_gamma_profiles:
         gamma.append("--keep-profiles")
 
@@ -249,6 +255,7 @@ def main(argv: list[str] | None = None) -> int:
     if any(value <= 0 for value in positive) or args.base_seed < 0:
         raise SystemExit("counts/epochs/workers must be positive and seed nonnegative")
     args.map = args.map.expanduser().resolve()
+    args.mask = args.mask.expanduser().resolve() if args.mask is not None else None
     args.mvn_dir = args.mvn_dir.expanduser().resolve()
     args.demography_cache = args.demography_cache.expanduser().resolve()
     args.sim_dir = args.sim_dir.expanduser().resolve()

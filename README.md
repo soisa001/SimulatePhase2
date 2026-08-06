@@ -50,8 +50,9 @@ The production defaults are:
   `gs://vwb-aou-datasets-controlled/v9/wgs/short_read/snpindel/aux/qc/flagged_samples.tsv`
 - relatedness exclusions:
   `gs://vwb-aou-datasets-controlled/v9/wgs/short_read/snpindel/aux/relatedness/relatedness_flagged_samples.tsv`
-- hard mask:
-  `gs://rw-migration-aou-rw-fa99430f/hardmask.hg38.v4.over99.bed`
+- hard mask: bundled as
+  `data/hardmask.hg38.v4.over99.bed.gz` (SHA256 is checked against the map
+  contract)
 - BCF filters retained: `PASS,.`
 - minimum per-population genotype call rate: `0.0` (literal any-called
   segregating-site count)
@@ -80,10 +81,21 @@ otherwise-segregating positions were excluded for low AN in each population.
 
 ```bash
 uv run python -u generate_map.py \
-  --output "$HOME/snv_theta_map.10kb.h5" \
-  --work-dir "$HOME/snv_theta_map_work" \
-  --cache-dir "$HOME/snv_theta_bcf_cache"
+  --hardmask data/hardmask.hg38.v4.over99.bed.gz \
+  --output data/snv_theta_map.10kb.h5 \
+  --work-dir /scratch.global/$USER/snv_theta_map_work \
+  --cache-dir /scratch.global/$USER/snv_theta_bcf_cache \
+  --window-size 10000 --samples-per-population 0 \
+  --sample-selection-seed 42 --jobs 4 --threads 4 \
+  --billing-project "$GOOGLE_PROJECT"
+uv run python -u validate_map_artifact.py
 ```
+
+The validation pass rereads every population/chromosome matrix row (thereby
+checking the HDF5 Fletcher32 filters), reconstructs callable geometry from the
+bundled hardmask, verifies the HDF5/JSON/SHA256 sidecars, and writes
+`data/snv_theta_map.10kb.h5.validation.json`. Preserve all four map files for
+the repository handoff.
 
 Add `--delete-localized` to bound disk usage to the BCFs currently being
 processed, at the cost of redownloading them if a completed chromosome must be
@@ -95,9 +107,10 @@ To upload the single compact artifact and its JSON/SHA256 sidecars:
 
 ```bash
 uv run python -u generate_map.py \
-  --output "$HOME/snv_theta_map.10kb.h5" \
-  --work-dir "$HOME/snv_theta_map_work" \
-  --cache-dir "$HOME/snv_theta_bcf_cache" \
+  --hardmask data/hardmask.hg38.v4.over99.bed.gz \
+  --output data/snv_theta_map.10kb.h5 \
+  --work-dir /scratch.global/$USER/snv_theta_map_work \
+  --cache-dir /scratch.global/$USER/snv_theta_bcf_cache \
   --upload gs://YOUR_BUCKET/simulate_phase2_maps
 ```
 
@@ -120,7 +133,10 @@ remain in the HDF5/JSON provenance.
 
 The checked-in `mvn/mutation_rate_map_perpop_all.h5` is a legacy 20 kb file
 without the v2 provenance or compact matrix contract. `run_sim.py`
-intentionally rejects it; regenerate the map with `generate_map.py`.
+intentionally rejects it: do not convert, resample, or use it for these runs.
+Generate the independent 10 kb map above. Once that artifact and its JSON and
+SHA256 sidecars are checked in under `data/`, the simulation launcher needs no
+external map or mask arguments.
 
 ## Run calibrated simulations
 
@@ -181,10 +197,7 @@ The cache is advisory-locked and atomically published.
 
 ```bash
 uv run python -u run_sim.py \
-  --map "$HOME/snv_theta_map.10kb.h5" \
-  --mask "$HOME/hardmask.hg38.v4.over99.bed" \
   --map-snapshot-dir "$HOME/simulate_phase2_map_snapshots" \
-  --mvn-dir mvn \
   --demography-cache /scratch.global/soisa001/sims/demographies \
   --sim-dir /scratch.global/soisa001/sims
 ```
@@ -334,7 +347,6 @@ is written by this workflow.
 uv run python -u generate_cutoff_gamma_smc.py \
   --sim-dir /scratch.global/soisa001/sims \
   --pops AFR,EUR,AMR,SAS,MID,EAS --chroms 1-22 --n-sims 1000 \
-  --hardmask "$HOME/hardmask.hg38.v4.over99.bed" \
   --gamma-smc-repo "$HOME/gamma_smc_ts" \
   --p-values 0.01,0.05 --decode-workers 4 --decode-threads 1
 ```
@@ -371,11 +383,9 @@ performs the audit before reading any nulls.
 
 ```bash
 uv run python -u run_full_simulation.py --phase demography \
-  --mvn-dir mvn --sim-dir /scratch.global/soisa001/sims
+  --sim-dir /scratch.global/soisa001/sims
 uv run python -u run_full_simulation.py --phase simulate \
-  --map "$HOME/snv_theta_map.10kb.h5" \
-  --mask "$HOME/hardmask.hg38.v4.over99.bed" \
-  --mvn-dir mvn --sim-dir /scratch.global/soisa001/sims
+  --sim-dir /scratch.global/soisa001/sims
 uv run python -u run_full_simulation.py --phase cutoffs \
   --cutoff-mode compact --sim-dir /scratch.global/soisa001/sims
 ```
@@ -403,8 +413,6 @@ the CLI default, so the smallest complete end-to-end command is:
 
 ```bash
 uv run --frozen python -u launch_simulation.py \
-  --map "$HOME/snv_theta_map.10kb.h5" \
-  --mask "$HOME/hardmask.hg38.v4.over99.bed" \
   --gamma-smc-repo "$HOME/gamma_smc_ts"
 ```
 
@@ -414,8 +422,6 @@ profile to Slurm with:
 ```bash
 uv run --frozen python -u launch_simulation.py \
   --profile full --mode slurm \
-  --map "$HOME/snv_theta_map.10kb.h5" \
-  --mask "$HOME/hardmask.hg38.v4.over99.bed" \
   --gamma-smc-repo "$HOME/gamma_smc_ts"
 ```
 
@@ -440,7 +446,7 @@ files; it does not assume 20 kb windows or old v8 population sizes.
 
 ```bash
 uv run python -u plot_sim_sanity.py \
-  --h5 "$HOME/snv_theta_map.10kb.h5" \
+  --h5 data/snv_theta_map.10kb.h5 \
   --sim-dir /path/to/persistent/sims \
   --n-sims 10 --workers 4
 ```

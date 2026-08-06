@@ -13,6 +13,11 @@ import numpy as np
 
 SCHEMA = "simulatephase2.snv-count-map/v2"
 DEFAULT_POPS = ("AFR", "EUR", "AMR", "SAS", "MID", "EAS")
+REPOSITORY_ROOT = Path(__file__).resolve().parent
+DEFAULT_MAP_PATH = REPOSITORY_ROOT / "data" / "snv_theta_map.10kb.h5"
+DEFAULT_HARDMASK_PATH = REPOSITORY_ROOT / "data" / "hardmask.hg38.v4.over99.bed.gz"
+DEFAULT_MVN_DIR = REPOSITORY_ROOT / "mvn"
+DEFAULT_GAMMA_SMC_REPO = REPOSITORY_ROOT.parent / "gamma_smc_ts"
 
 
 def canonical_chrom(value: str | int) -> str:

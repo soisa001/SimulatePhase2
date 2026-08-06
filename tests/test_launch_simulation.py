@@ -25,6 +25,15 @@ def _resolved(tmp_path: Path, *extra: str):
     return launch_simulation.resolve(launch_simulation.parser().parse_args(arguments))
 
 
+def test_repository_inputs_are_the_no_argument_defaults() -> None:
+    args = launch_simulation.resolve(launch_simulation.parser().parse_args([]))
+    repository = Path(launch_simulation.__file__).resolve().parent
+    assert args.map == repository / "data" / "snv_theta_map.10kb.h5"
+    assert args.mask == repository / "data" / "hardmask.hg38.v4.over99.bed.gz"
+    assert args.mvn_dir == repository / "mvn"
+    assert args.gamma_smc_repo == repository.parent / "gamma_smc_ts"
+
+
 def test_test_profile_is_local_eur100_with_deep_check(tmp_path: Path) -> None:
     args = _resolved(tmp_path)
     assert args.profile == "test"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 import run_full_simulation
 
@@ -46,3 +47,12 @@ def test_gamma_cutoff_mode_runs_completeness_first(tmp_path) -> None:
     assert "generate_cutoff_gamma_smc.py" in " ".join(gamma)
     assert gamma[gamma.index("--decode-workers") + 1] == "4"
     assert gamma[gamma.index("--decode-threads") + 1] == "1"
+
+
+def test_repository_inputs_are_defaults() -> None:
+    args = run_full_simulation.parser().parse_args([])
+    repository = Path(run_full_simulation.__file__).resolve().parent
+    assert args.map == repository / "data" / "snv_theta_map.10kb.h5"
+    assert args.mask == repository / "data" / "hardmask.hg38.v4.over99.bed.gz"
+    assert args.mvn_dir == repository / "mvn"
+    assert args.gamma_smc_repo == repository.parent / "gamma_smc_ts"

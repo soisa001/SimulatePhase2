@@ -48,6 +48,8 @@ import tskit
 import tszip
 
 from phase2_map import (
+    DEFAULT_MAP_PATH,
+    DEFAULT_MVN_DIR,
     DEFAULT_POPS,
     SCHEMA,
     ChromosomeTarget,
@@ -1591,7 +1593,7 @@ def parser() -> argparse.ArgumentParser:
         "--h5",
         dest="map_path",
         type=Path,
-        default=Path("data/snv_theta_map.10kb.h5"),
+        default=DEFAULT_MAP_PATH,
     )
     result.add_argument(
         "--map-snapshot-dir",
@@ -1615,7 +1617,7 @@ def parser() -> argparse.ArgumentParser:
     )
     result.add_argument("--gcloud", default="gcloud")
     result.add_argument("--billing-project", default=None)
-    result.add_argument("--mvn-dir", type=Path, default=Path("mvn"))
+    result.add_argument("--mvn-dir", type=Path, default=DEFAULT_MVN_DIR)
     result.add_argument(
         "--demography-cache", "--demog-dir", type=Path, default=DEFAULT_DEMOGRAPHY_CACHE
     )
@@ -1696,6 +1698,11 @@ def main(argv: list[str] | None = None) -> int:
         mask_sha256 = str(handle.attrs.get("hardmask_sha256", "")).strip()
     if not mask_source:
         raise SystemExit("map has no hardmask source; regenerate it with generate_map.py")
+    if args.mask is None and not mask_source.startswith("gs://"):
+        recorded_mask = Path(mask_source).expanduser()
+        if not recorded_mask.is_absolute():
+            recorded_mask = map_source.parent / recorded_mask
+        mask_source = str(recorded_mask.resolve())
     mask_cache_directory = (
         args.mask_cache_dir.expanduser().resolve()
         if args.mask_cache_dir is not None

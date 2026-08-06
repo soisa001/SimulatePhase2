@@ -15,8 +15,18 @@ import sys
 import tempfile
 from pathlib import Path
 
-from phase2_map import DEFAULT_POPS, parse_chroms
-from run_sim import DEFAULT_SIM_DIR
+import h5py
+
+from phase2_map import (
+    DEFAULT_GAMMA_SMC_REPO,
+    DEFAULT_HARDMASK_PATH,
+    DEFAULT_MAP_PATH,
+    DEFAULT_MVN_DIR,
+    DEFAULT_POPS,
+    SCHEMA,
+    parse_chroms,
+)
+from run_sim import DEFAULT_SIM_DIR, sha256_file
 
 LAUNCH_SCHEMA = "simulatephase2.launch/v1"
 DEFAULT_TEST_SIM_DIR = Path("/scratch.global/soisa001/sims_eur100_test")
@@ -55,8 +65,18 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument(
         "--cutoff-mode", choices=("compact", "gamma-smc", "both"), default="both"
     )
-    result.add_argument("--map", type=Path, required=True)
-    result.add_argument("--mask", type=Path, required=True)
+    result.add_argument(
+        "--map",
+        type=Path,
+        default=None,
+        help=f"SNV count map (default: bundled {DEFAULT_MAP_PATH.name})",
+    )
+    result.add_argument(
+        "--mask",
+        type=Path,
+        default=None,
+        help=f"Exclusion mask (default: bundled {DEFAULT_HARDMASK_PATH.name})",
+    )
     result.add_argument("--mvn-dir", type=Path, default=None)
     result.add_argument("--gamma-smc-repo", type=Path, default=None)
     result.add_argument("--sim-dir", type=Path, default=None)
@@ -120,7 +140,6 @@ def parser() -> argparse.ArgumentParser:
 
 
 def resolve(args: argparse.Namespace) -> argparse.Namespace:
-    repository = Path(__file__).resolve().parent
     args.pops = args.pops or ("EUR" if args.profile == "test" else ",".join(DEFAULT_POPS))
     populations = [part.strip().upper() for part in args.pops.split(",") if part.strip()]
     unknown = sorted(set(populations) - set(DEFAULT_POPS))
@@ -146,17 +165,17 @@ def resolve(args: argparse.Namespace) -> argparse.Namespace:
         if args.logs_dir is not None
         else args.sim_dir / "logs"
     )
-    args.map = args.map.expanduser().resolve()
-    args.mask = args.mask.expanduser().resolve()
+    args.map = (args.map or DEFAULT_MAP_PATH).expanduser().resolve()
+    args.mask = (args.mask or DEFAULT_HARDMASK_PATH).expanduser().resolve()
     args.mvn_dir = (
         args.mvn_dir.expanduser().resolve()
         if args.mvn_dir is not None
-        else repository / "mvn"
+        else DEFAULT_MVN_DIR
     )
     args.gamma_smc_repo = (
         args.gamma_smc_repo.expanduser().resolve()
         if args.gamma_smc_repo is not None
-        else repository.parent / "gamma_smc_ts"
+        else DEFAULT_GAMMA_SMC_REPO
     )
 
     default_parallelism = 4 if args.mode == "local" else min(32, args.cpus)
@@ -202,6 +221,21 @@ def validate_inputs(args: argparse.Namespace) -> None:
         exists = path.is_dir() if label == "MVN directory" else path.is_file()
         if not exists:
             raise FileNotFoundError(f"{label} does not exist: {path}")
+    with h5py.File(args.map, "r") as handle:
+        schema = str(handle.attrs.get("schema", ""))
+        complete = bool(handle.attrs.get("complete", False))
+        expected_mask_sha256 = str(handle.attrs.get("hardmask_sha256", ""))
+    if schema != SCHEMA or not complete:
+        raise ValueError(
+            f"map is not a complete {SCHEMA} artifact: {args.map} "
+            f"(schema={schema!r}, complete={complete})"
+        )
+    observed_mask_sha256 = sha256_file(args.mask)
+    if observed_mask_sha256 != expected_mask_sha256:
+        raise ValueError(
+            "hardmask SHA256 differs from map contract: "
+            f"{observed_mask_sha256} != {expected_mask_sha256}"
+        )
     needs_gamma = args.phase in ("all", "cutoffs") and args.cutoff_mode in (
         "gamma-smc",
         "both",

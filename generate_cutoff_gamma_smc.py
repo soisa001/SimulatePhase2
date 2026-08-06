@@ -36,7 +36,14 @@ from generate_cutoffs import (
     monte_carlo_cutoffs,
     parse_p_values,
 )
-from phase2_map import DEFAULT_POPS, clip_merged_mask, load_mask, parse_chroms
+from phase2_map import (
+    DEFAULT_GAMMA_SMC_REPO,
+    DEFAULT_HARDMASK_PATH,
+    DEFAULT_POPS,
+    clip_merged_mask,
+    load_mask,
+    parse_chroms,
+)
 from run_sim import DEFAULT_SIM_DIR, atomic_text, output_lock, sha256_file
 from simulation_outputs import completed_units, validate_completed_unit
 
@@ -693,7 +700,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--chroms", default="1-22")
     result.add_argument("--n-sims", type=int, default=1_000)
     result.add_argument("--p-values", default=",".join(map(str, DEFAULT_P_VALUES)))
-    result.add_argument("--gamma-smc-repo", type=Path, default=Path("../gamma_smc_ts"))
+    result.add_argument("--gamma-smc-repo", type=Path, default=DEFAULT_GAMMA_SMC_REPO)
     result.add_argument("--gamma-smc-aou", type=Path, default=None)
     result.add_argument("--gamma-smc-executable", type=Path, default=None)
     result.add_argument("--hardmask", type=Path, default=None)
@@ -765,6 +772,14 @@ def main(argv: list[str] | None = None) -> int:
     if not isinstance(global_contract, dict):
         raise SystemExit("simulation contract has no global mapping")
     expected_hardmask_sha256 = str(global_contract.get("mask_sha256", ""))
+    hardmask = args.hardmask
+    no_mask_sha256 = hashlib.sha256(b"NO_MASK").hexdigest()
+    if hardmask is None and expected_hardmask_sha256 != no_mask_sha256:
+        if (
+            DEFAULT_HARDMASK_PATH.is_file()
+            and sha256_file(DEFAULT_HARDMASK_PATH) == expected_hardmask_sha256
+        ):
+            hardmask = DEFAULT_HARDMASK_PATH
     sequence_lengths: dict[str, int] = {}
     for chromosome in chromosomes:
         paths, _ = completed_units(sim_dir, populations[0], chromosome, args.n_sims)
@@ -780,7 +795,7 @@ def main(argv: list[str] | None = None) -> int:
             sim_dir=sim_dir,
             chromosomes=chromosomes,
             sequence_lengths=sequence_lengths,
-            hardmask=args.hardmask,
+            hardmask=hardmask,
             expected_hardmask_sha256=expected_hardmask_sha256,
         )
         decode_contracts = {
