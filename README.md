@@ -368,6 +368,55 @@ Use `--phase all` for the same sequence in one invocation. For empirical-method
 cutoffs, set `--cutoff-mode gamma-smc --gamma-smc-repo "$HOME/gamma_smc_ts"`
 and pass the same localized `--mask` used for simulation.
 
+## Local and Slurm launcher
+
+`launch_simulation.py` resolves an explicit test or full profile and then runs
+the same phased workflow either directly or as one single-node Slurm job. Its
+defaults are deliberately safe:
+
+- `--profile test --mode local`: EUR only, 100 simulations, chromosomes 1--22,
+  compact tree-truth plus matched Gamma-SMC cutoffs, and a deep TSZip check;
+- `--profile full --mode local`: all six populations and 1,000 simulations,
+  with quick sidecar/ZIP checks before both cutoff reducers;
+- `--mode slurm`: submit rather than execute, using partition `sioux`, 50
+  allocated CPUs, 384 GB RAM, 300 GB local temporary storage, 32 simulation
+  workers, and 32 one-thread Gamma-SMC decoders by default.
+
+Local remains the default for both profiles. The test profile itself is also
+the CLI default, so the smallest complete end-to-end command is:
+
+```bash
+uv run --frozen python -u launch_simulation.py \
+  --map "$HOME/snv_theta_map.10kb.h5" \
+  --mask "$HOME/hardmask.hg38.v4.over99.bed" \
+  --gamma-smc-repo "$HOME/gamma_smc_ts"
+```
+
+Run the full workflow locally by adding `--profile full`. Submit that full
+profile to Slurm with:
+
+```bash
+uv run --frozen python -u launch_simulation.py \
+  --profile full --mode slurm \
+  --map "$HOME/snv_theta_map.10kb.h5" \
+  --mask "$HOME/hardmask.hg38.v4.over99.bed" \
+  --gamma-smc-repo "$HOME/gamma_smc_ts"
+```
+
+The Slurm launcher writes a content-keyed command contract and job script under
+`<sim-dir>/launches`, then records the returned job ID. Repeating an identical
+submission while that job remains queued or running does not submit a duplicate.
+Use `--dry-run` to print the fully resolved command without requiring inputs or
+creating output, and override resources with `--cpus`, `--mem`, `--tmp`,
+`--time`, `--workers`, or `--decode-workers`. Additional `sbatch` arguments can
+be repeated as `--slurm-extra=...`.
+
+Both cutoff HDF5 files store the requested p-value levels at the root and a
+`len(p_value) x n_windows` cutoff matrix for each chromosome. The full
+simulation-by-window null matrix is transient by design. For 100 nulls, the
+minimum plus-one Monte Carlo p-value is `1/101 = 0.00990099`; consequently the
+0.01 cutoff is the largest null value and the 0.05 cutoff is the fifth largest.
+
 ## Plot completed simulations
 
 The sanity plotter reads the same map schema and any completed simulation
