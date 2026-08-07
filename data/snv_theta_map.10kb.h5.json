@@ -1,0 +1,1267 @@
+{
+  "artifact": "/home/jupyter/SimulatePhase2/data/snv_theta_map.10kb.h5",
+  "callability_policy": {
+    "expected_diploid_an": {
+      "AFR": 4450,
+      "AMR": 3460,
+      "EAS": 2478,
+      "EUR": 3298,
+      "MID": 774,
+      "SAS": 2282
+    },
+    "min_call_rate": 0.0,
+    "minimum_an": {
+      "AFR": 0,
+      "AMR": 0,
+      "EAS": 0,
+      "EUR": 0,
+      "MID": 0,
+      "SAS": 0
+    },
+    "segregating_definition": "0 < AC < AN and AN >= minimum_an"
+  },
+  "chromosomes": {
+    "chr1": {
+      "length_bp": 248956422,
+      "matrix_dtype": "uint16",
+      "matrix_shape": [
+        6,
+        24896
+      ],
+      "qc": {
+        "distinct_source_positions": 8047146,
+        "duplicate_or_multiallelic_positions_excluded": 321841,
+        "eligible_singleton_biallelic_snv_positions": 7194108,
+        "expected_diploid_an": {
+          "AFR": 4450,
+          "AMR": 3460,
+          "EAS": 2478,
+          "EUR": 3298,
+          "MID": 774,
+          "SAS": 2282
+        },
+        "min_call_rate": 0.0,
+        "minimum_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "segregating_positions_excluded_low_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "source_records_in_callable_intervals": 10619807
+      },
+      "source_identity": {
+        "crc32c_hash": "9R+BIw==",
+        "etag": "CK/L/eqTj5UDEAE=",
+        "generation": "1781729557702063",
+        "kind": "gcs",
+        "md5_hash": "Hhc6cPMlM+X6ZPFO9op+BA==",
+        "metageneration": 1,
+        "size": 8023276648,
+        "source": "gs://rw-long-reads-transfer-2026-06-17/v9/lrWGS/panel/panel/panel_bubble_split_vcf/aou_lr_phase2_v1.chr1.bubble.split.bcf"
+      },
+      "windows": 24896
+    },
+    "chr10": {
+      "length_bp": 133797422,
+      "matrix_dtype": "uint16",
+      "matrix_shape": [
+        6,
+        13380
+      ],
+      "qc": {
+        "distinct_source_positions": 4942781,
+        "duplicate_or_multiallelic_positions_excluded": 198767,
+        "eligible_singleton_biallelic_snv_positions": 4429069,
+        "expected_diploid_an": {
+          "AFR": 4450,
+          "AMR": 3460,
+          "EAS": 2478,
+          "EUR": 3298,
+          "MID": 774,
+          "SAS": 2282
+        },
+        "min_call_rate": 0.0,
+        "minimum_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "segregating_positions_excluded_low_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "source_records_in_callable_intervals": 6686561
+      },
+      "source_identity": {
+        "crc32c_hash": "vWcfAw==",
+        "etag": "CKXjo+yTj5UDEAE=",
+        "generation": "1781729560424869",
+        "kind": "gcs",
+        "md5_hash": "Mq7goKn23wLcjrgjJ/9rQQ==",
+        "metageneration": 1,
+        "size": 5018242807,
+        "source": "gs://rw-long-reads-transfer-2026-06-17/v9/lrWGS/panel/panel/panel_bubble_split_vcf/aou_lr_phase2_v1.chr10.bubble.split.bcf"
+      },
+      "windows": 13380
+    },
+    "chr11": {
+      "length_bp": 135086622,
+      "matrix_dtype": "uint16",
+      "matrix_shape": [
+        6,
+        13509
+      ],
+      "qc": {
+        "distinct_source_positions": 4960055,
+        "duplicate_or_multiallelic_positions_excluded": 195010,
+        "eligible_singleton_biallelic_snv_positions": 4448405,
+        "expected_diploid_an": {
+          "AFR": 4450,
+          "AMR": 3460,
+          "EAS": 2478,
+          "EUR": 3298,
+          "MID": 774,
+          "SAS": 2282
+        },
+        "min_call_rate": 0.0,
+        "minimum_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "segregating_positions_excluded_low_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "source_records_in_callable_intervals": 6456318
+      },
+      "source_identity": {
+        "crc32c_hash": "ZS/0LA==",
+        "etag": "CN6OqOyTj5UDEAE=",
+        "generation": "1781729560495966",
+        "kind": "gcs",
+        "md5_hash": "jtd5NiIk9cOjY1yNcKeSPA==",
+        "metageneration": 1,
+        "size": 4635999843,
+        "source": "gs://rw-long-reads-transfer-2026-06-17/v9/lrWGS/panel/panel/panel_bubble_split_vcf/aou_lr_phase2_v1.chr11.bubble.split.bcf"
+      },
+      "windows": 13509
+    },
+    "chr12": {
+      "length_bp": 133275309,
+      "matrix_dtype": "uint16",
+      "matrix_shape": [
+        6,
+        13328
+      ],
+      "qc": {
+        "distinct_source_positions": 4771959,
+        "duplicate_or_multiallelic_positions_excluded": 194285,
+        "eligible_singleton_biallelic_snv_positions": 4257009,
+        "expected_diploid_an": {
+          "AFR": 4450,
+          "AMR": 3460,
+          "EAS": 2478,
+          "EUR": 3298,
+          "MID": 774,
+          "SAS": 2282
+        },
+        "min_call_rate": 0.0,
+        "minimum_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "segregating_positions_excluded_low_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "source_records_in_callable_intervals": 6469525
+      },
+      "source_identity": {
+        "crc32c_hash": "wn4fgg==",
+        "etag": "CKm8huuTj5UDEAE=",
+        "generation": "1781729557847593",
+        "kind": "gcs",
+        "md5_hash": "Q+bSaR4oA3mvQgiMyIxtNg==",
+        "metageneration": 1,
+        "size": 5035762630,
+        "source": "gs://rw-long-reads-transfer-2026-06-17/v9/lrWGS/panel/panel/panel_bubble_split_vcf/aou_lr_phase2_v1.chr12.bubble.split.bcf"
+      },
+      "windows": 13328
+    },
+    "chr13": {
+      "length_bp": 114364328,
+      "matrix_dtype": "uint16",
+      "matrix_shape": [
+        6,
+        11437
+      ],
+      "qc": {
+        "distinct_source_positions": 3577147,
+        "duplicate_or_multiallelic_positions_excluded": 139577,
+        "eligible_singleton_biallelic_snv_positions": 3189036,
+        "expected_diploid_an": {
+          "AFR": 4450,
+          "AMR": 3460,
+          "EAS": 2478,
+          "EUR": 3298,
+          "MID": 774,
+          "SAS": 2282
+        },
+        "min_call_rate": 0.0,
+        "minimum_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "segregating_positions_excluded_low_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "source_records_in_callable_intervals": 4706242
+      },
+      "source_identity": {
+        "crc32c_hash": "N/7vzA==",
+        "etag": "CObxxeuTj5UDEAE=",
+        "generation": "1781729558886630",
+        "kind": "gcs",
+        "md5_hash": "6EFhqqA8iFH1v+mZtELTcg==",
+        "metageneration": 1,
+        "size": 3504390483,
+        "source": "gs://rw-long-reads-transfer-2026-06-17/v9/lrWGS/panel/panel/panel_bubble_split_vcf/aou_lr_phase2_v1.chr13.bubble.split.bcf"
+      },
+      "windows": 11437
+    },
+    "chr14": {
+      "length_bp": 107043718,
+      "matrix_dtype": "uint16",
+      "matrix_shape": [
+        6,
+        10705
+      ],
+      "qc": {
+        "distinct_source_positions": 3295034,
+        "duplicate_or_multiallelic_positions_excluded": 133735,
+        "eligible_singleton_biallelic_snv_positions": 2941253,
+        "expected_diploid_an": {
+          "AFR": 4450,
+          "AMR": 3460,
+          "EAS": 2478,
+          "EUR": 3298,
+          "MID": 774,
+          "SAS": 2282
+        },
+        "min_call_rate": 0.0,
+        "minimum_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "segregating_positions_excluded_low_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "source_records_in_callable_intervals": 4402178
+      },
+      "source_identity": {
+        "crc32c_hash": "FO/r4Q==",
+        "etag": "CPGs9euTj5UDEAE=",
+        "generation": "1781729559664241",
+        "kind": "gcs",
+        "md5_hash": "6P423G7SLFk4xk93LAQKcQ==",
+        "metageneration": 1,
+        "size": 3223031418,
+        "source": "gs://rw-long-reads-transfer-2026-06-17/v9/lrWGS/panel/panel/panel_bubble_split_vcf/aou_lr_phase2_v1.chr14.bubble.split.bcf"
+      },
+      "windows": 10705
+    },
+    "chr15": {
+      "length_bp": 101991189,
+      "matrix_dtype": "uint16",
+      "matrix_shape": [
+        6,
+        10200
+      ],
+      "qc": {
+        "distinct_source_positions": 2994339,
+        "duplicate_or_multiallelic_positions_excluded": 124423,
+        "eligible_singleton_biallelic_snv_positions": 2672349,
+        "expected_diploid_an": {
+          "AFR": 4450,
+          "AMR": 3460,
+          "EAS": 2478,
+          "EUR": 3298,
+          "MID": 774,
+          "SAS": 2282
+        },
+        "min_call_rate": 0.0,
+        "minimum_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "segregating_positions_excluded_low_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "source_records_in_callable_intervals": 4106514
+      },
+      "source_identity": {
+        "crc32c_hash": "zWIg5Q==",
+        "etag": "CNjjiOyTj5UDEAE=",
+        "generation": "1781729559982552",
+        "kind": "gcs",
+        "md5_hash": "g8espqjsAqVuivjhd73Y6w==",
+        "metageneration": 1,
+        "size": 3418871490,
+        "source": "gs://rw-long-reads-transfer-2026-06-17/v9/lrWGS/panel/panel/panel_bubble_split_vcf/aou_lr_phase2_v1.chr15.bubble.split.bcf"
+      },
+      "windows": 10200
+    },
+    "chr16": {
+      "length_bp": 90338345,
+      "matrix_dtype": "uint16",
+      "matrix_shape": [
+        6,
+        9034
+      ],
+      "qc": {
+        "distinct_source_positions": 3221632,
+        "duplicate_or_multiallelic_positions_excluded": 141816,
+        "eligible_singleton_biallelic_snv_positions": 2903381,
+        "expected_diploid_an": {
+          "AFR": 4450,
+          "AMR": 3460,
+          "EAS": 2478,
+          "EUR": 3298,
+          "MID": 774,
+          "SAS": 2282
+        },
+        "min_call_rate": 0.0,
+        "minimum_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "segregating_positions_excluded_low_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "source_records_in_callable_intervals": 4589375
+      },
+      "source_identity": {
+        "crc32c_hash": "sd8q1w==",
+        "etag": "CJX5xeqTj5UDEAE=",
+        "generation": "1781729556790421",
+        "kind": "gcs",
+        "md5_hash": "f1woJ2ni2Hs7mfeCG10o+A==",
+        "metageneration": 1,
+        "size": 3635466542,
+        "source": "gs://rw-long-reads-transfer-2026-06-17/v9/lrWGS/panel/panel/panel_bubble_split_vcf/aou_lr_phase2_v1.chr16.bubble.split.bcf"
+      },
+      "windows": 9034
+    },
+    "chr17": {
+      "length_bp": 83257441,
+      "matrix_dtype": "uint16",
+      "matrix_shape": [
+        6,
+        8326
+      ],
+      "qc": {
+        "distinct_source_positions": 2857872,
+        "duplicate_or_multiallelic_positions_excluded": 126866,
+        "eligible_singleton_biallelic_snv_positions": 2544083,
+        "expected_diploid_an": {
+          "AFR": 4450,
+          "AMR": 3460,
+          "EAS": 2478,
+          "EUR": 3298,
+          "MID": 774,
+          "SAS": 2282
+        },
+        "min_call_rate": 0.0,
+        "minimum_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "segregating_positions_excluded_low_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "source_records_in_callable_intervals": 4502584
+      },
+      "source_identity": {
+        "crc32c_hash": "c2Y/hA==",
+        "etag": "CM6+rOqTj5UDEAE=",
+        "generation": "1781729556373326",
+        "kind": "gcs",
+        "md5_hash": "3jk6JiG4kVdshyAWmsVCRQ==",
+        "metageneration": 1,
+        "size": 4294986272,
+        "source": "gs://rw-long-reads-transfer-2026-06-17/v9/lrWGS/panel/panel/panel_bubble_split_vcf/aou_lr_phase2_v1.chr17.bubble.split.bcf"
+      },
+      "windows": 8326
+    },
+    "chr18": {
+      "length_bp": 80373285,
+      "matrix_dtype": "uint16",
+      "matrix_shape": [
+        6,
+        8038
+      ],
+      "qc": {
+        "distinct_source_positions": 2834741,
+        "duplicate_or_multiallelic_positions_excluded": 112106,
+        "eligible_singleton_biallelic_snv_positions": 2533116,
+        "expected_diploid_an": {
+          "AFR": 4450,
+          "AMR": 3460,
+          "EAS": 2478,
+          "EUR": 3298,
+          "MID": 774,
+          "SAS": 2282
+        },
+        "min_call_rate": 0.0,
+        "minimum_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "segregating_positions_excluded_low_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "source_records_in_callable_intervals": 3774841
+      },
+      "source_identity": {
+        "crc32c_hash": "S9YbUA==",
+        "etag": "CMnq1+qTj5UDEAE=",
+        "generation": "1781729557083465",
+        "kind": "gcs",
+        "md5_hash": "qByAqcYxekZgXo0yOFQiYw==",
+        "metageneration": 1,
+        "size": 2751904611,
+        "source": "gs://rw-long-reads-transfer-2026-06-17/v9/lrWGS/panel/panel/panel_bubble_split_vcf/aou_lr_phase2_v1.chr18.bubble.split.bcf"
+      },
+      "windows": 8038
+    },
+    "chr19": {
+      "length_bp": 58617616,
+      "matrix_dtype": "uint16",
+      "matrix_shape": [
+        6,
+        5862
+      ],
+      "qc": {
+        "distinct_source_positions": 2137643,
+        "duplicate_or_multiallelic_positions_excluded": 104503,
+        "eligible_singleton_biallelic_snv_positions": 1896896,
+        "expected_diploid_an": {
+          "AFR": 4450,
+          "AMR": 3460,
+          "EAS": 2478,
+          "EUR": 3298,
+          "MID": 774,
+          "SAS": 2282
+        },
+        "min_call_rate": 0.0,
+        "minimum_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "segregating_positions_excluded_low_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "source_records_in_callable_intervals": 4057237
+      },
+      "source_identity": {
+        "crc32c_hash": "RxQg6g==",
+        "etag": "CKfZ/uqTj5UDEAE=",
+        "generation": "1781729557720231",
+        "kind": "gcs",
+        "md5_hash": "TqV6YsfqlLtL3Pb9ICLlJg==",
+        "metageneration": 1,
+        "size": 4385686622,
+        "source": "gs://rw-long-reads-transfer-2026-06-17/v9/lrWGS/panel/panel/panel_bubble_split_vcf/aou_lr_phase2_v1.chr19.bubble.split.bcf"
+      },
+      "windows": 5862
+    },
+    "chr2": {
+      "length_bp": 242193529,
+      "matrix_dtype": "uint16",
+      "matrix_shape": [
+        6,
+        24220
+      ],
+      "qc": {
+        "distinct_source_positions": 8823070,
+        "duplicate_or_multiallelic_positions_excluded": 344717,
+        "eligible_singleton_biallelic_snv_positions": 7897449,
+        "expected_diploid_an": {
+          "AFR": 4450,
+          "AMR": 3460,
+          "EAS": 2478,
+          "EUR": 3298,
+          "MID": 774,
+          "SAS": 2282
+        },
+        "min_call_rate": 0.0,
+        "minimum_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "segregating_positions_excluded_low_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "source_records_in_callable_intervals": 11411370
+      },
+      "source_identity": {
+        "crc32c_hash": "KKibmg==",
+        "etag": "CKm0xuqTj5UDEAE=",
+        "generation": "1781729556797993",
+        "kind": "gcs",
+        "md5_hash": "gSF7lnoL9opx7jklaDkW8g==",
+        "metageneration": 1,
+        "size": 8206308733,
+        "source": "gs://rw-long-reads-transfer-2026-06-17/v9/lrWGS/panel/panel/panel_bubble_split_vcf/aou_lr_phase2_v1.chr2.bubble.split.bcf"
+      },
+      "windows": 24220
+    },
+    "chr20": {
+      "length_bp": 64444167,
+      "matrix_dtype": "uint16",
+      "matrix_shape": [
+        6,
+        6445
+      ],
+      "qc": {
+        "distinct_source_positions": 2319164,
+        "duplicate_or_multiallelic_positions_excluded": 93556,
+        "eligible_singleton_biallelic_snv_positions": 2081627,
+        "expected_diploid_an": {
+          "AFR": 4450,
+          "AMR": 3460,
+          "EAS": 2478,
+          "EUR": 3298,
+          "MID": 774,
+          "SAS": 2282
+        },
+        "min_call_rate": 0.0,
+        "minimum_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "segregating_positions_excluded_low_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "source_records_in_callable_intervals": 3177881
+      },
+      "source_identity": {
+        "crc32c_hash": "7LMvcw==",
+        "etag": "CMv3zOuTj5UDEAE=",
+        "generation": "1781729559002059",
+        "kind": "gcs",
+        "md5_hash": "Ja/0EO9a7fKbnuvSDu3Zzg==",
+        "metageneration": 1,
+        "size": 2948949426,
+        "source": "gs://rw-long-reads-transfer-2026-06-17/v9/lrWGS/panel/panel/panel_bubble_split_vcf/aou_lr_phase2_v1.chr20.bubble.split.bcf"
+      },
+      "windows": 6445
+    },
+    "chr21": {
+      "length_bp": 46709983,
+      "matrix_dtype": "uint16",
+      "matrix_shape": [
+        6,
+        4671
+      ],
+      "qc": {
+        "distinct_source_positions": 1319604,
+        "duplicate_or_multiallelic_positions_excluded": 54623,
+        "eligible_singleton_biallelic_snv_positions": 1177786,
+        "expected_diploid_an": {
+          "AFR": 4450,
+          "AMR": 3460,
+          "EAS": 2478,
+          "EUR": 3298,
+          "MID": 774,
+          "SAS": 2282
+        },
+        "min_call_rate": 0.0,
+        "minimum_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "segregating_positions_excluded_low_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "source_records_in_callable_intervals": 1902695
+      },
+      "source_identity": {
+        "crc32c_hash": "c/vABw==",
+        "etag": "CMaK6+qTj5UDEAE=",
+        "generation": "1781729557398854",
+        "kind": "gcs",
+        "md5_hash": "U2e1sZj1DecMnJM2ABAluA==",
+        "metageneration": 1,
+        "size": 1842634219,
+        "source": "gs://rw-long-reads-transfer-2026-06-17/v9/lrWGS/panel/panel/panel_bubble_split_vcf/aou_lr_phase2_v1.chr21.bubble.split.bcf"
+      },
+      "windows": 4671
+    },
+    "chr22": {
+      "length_bp": 50818468,
+      "matrix_dtype": "uint16",
+      "matrix_shape": [
+        6,
+        5082
+      ],
+      "qc": {
+        "distinct_source_positions": 1379656,
+        "duplicate_or_multiallelic_positions_excluded": 60229,
+        "eligible_singleton_biallelic_snv_positions": 1235577,
+        "expected_diploid_an": {
+          "AFR": 4450,
+          "AMR": 3460,
+          "EAS": 2478,
+          "EUR": 3298,
+          "MID": 774,
+          "SAS": 2282
+        },
+        "min_call_rate": 0.0,
+        "minimum_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "segregating_positions_excluded_low_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "source_records_in_callable_intervals": 2115541
+      },
+      "source_identity": {
+        "crc32c_hash": "jIOuiw==",
+        "etag": "CPP8nOuTj5UDEAE=",
+        "generation": "1781729558216307",
+        "kind": "gcs",
+        "md5_hash": "FABkIPLkce1GyoC7gIn4Ow==",
+        "metageneration": 1,
+        "size": 2678543184,
+        "source": "gs://rw-long-reads-transfer-2026-06-17/v9/lrWGS/panel/panel/panel_bubble_split_vcf/aou_lr_phase2_v1.chr22.bubble.split.bcf"
+      },
+      "windows": 5082
+    },
+    "chr3": {
+      "length_bp": 198295559,
+      "matrix_dtype": "uint16",
+      "matrix_shape": [
+        6,
+        19830
+      ],
+      "qc": {
+        "distinct_source_positions": 7328329,
+        "duplicate_or_multiallelic_positions_excluded": 287548,
+        "eligible_singleton_biallelic_snv_positions": 6554837,
+        "expected_diploid_an": {
+          "AFR": 4450,
+          "AMR": 3460,
+          "EAS": 2478,
+          "EUR": 3298,
+          "MID": 774,
+          "SAS": 2282
+        },
+        "min_call_rate": 0.0,
+        "minimum_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "segregating_positions_excluded_low_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "source_records_in_callable_intervals": 9503510
+      },
+      "source_identity": {
+        "crc32c_hash": "5U4a9A==",
+        "etag": "CIT00eyTj5UDEAE=",
+        "generation": "1781729561180676",
+        "kind": "gcs",
+        "md5_hash": "cYZoNvr0a3rsmgDuqll04Q==",
+        "metageneration": 1,
+        "size": 6620223449,
+        "source": "gs://rw-long-reads-transfer-2026-06-17/v9/lrWGS/panel/panel/panel_bubble_split_vcf/aou_lr_phase2_v1.chr3.bubble.split.bcf"
+      },
+      "windows": 19830
+    },
+    "chr4": {
+      "length_bp": 190214555,
+      "matrix_dtype": "uint16",
+      "matrix_shape": [
+        6,
+        19022
+      ],
+      "qc": {
+        "distinct_source_positions": 7207335,
+        "duplicate_or_multiallelic_positions_excluded": 285815,
+        "eligible_singleton_biallelic_snv_positions": 6438490,
+        "expected_diploid_an": {
+          "AFR": 4450,
+          "AMR": 3460,
+          "EAS": 2478,
+          "EUR": 3298,
+          "MID": 774,
+          "SAS": 2282
+        },
+        "min_call_rate": 0.0,
+        "minimum_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "segregating_positions_excluded_low_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "source_records_in_callable_intervals": 9439621
+      },
+      "source_identity": {
+        "crc32c_hash": "FW1xLg==",
+        "etag": "CK+YpuyTj5UDEAE=",
+        "generation": "1781729560464431",
+        "kind": "gcs",
+        "md5_hash": "Oj7Wbnzsbgn6rbrKKea3Xg==",
+        "metageneration": 1,
+        "size": 6306356827,
+        "source": "gs://rw-long-reads-transfer-2026-06-17/v9/lrWGS/panel/panel/panel_bubble_split_vcf/aou_lr_phase2_v1.chr4.bubble.split.bcf"
+      },
+      "windows": 19022
+    },
+    "chr5": {
+      "length_bp": 181538259,
+      "matrix_dtype": "uint16",
+      "matrix_shape": [
+        6,
+        18154
+      ],
+      "qc": {
+        "distinct_source_positions": 6646117,
+        "duplicate_or_multiallelic_positions_excluded": 259618,
+        "eligible_singleton_biallelic_snv_positions": 5947365,
+        "expected_diploid_an": {
+          "AFR": 4450,
+          "AMR": 3460,
+          "EAS": 2478,
+          "EUR": 3298,
+          "MID": 774,
+          "SAS": 2282
+        },
+        "min_call_rate": 0.0,
+        "minimum_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "segregating_positions_excluded_low_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "source_records_in_callable_intervals": 8571011
+      },
+      "source_identity": {
+        "crc32c_hash": "DIvwMg==",
+        "etag": "CPDkiuyTj5UDEAE=",
+        "generation": "1781729560015472",
+        "kind": "gcs",
+        "md5_hash": "6YwFYgMUqhH8YZG0XcFyYA==",
+        "metageneration": 1,
+        "size": 6072021840,
+        "source": "gs://rw-long-reads-transfer-2026-06-17/v9/lrWGS/panel/panel/panel_bubble_split_vcf/aou_lr_phase2_v1.chr5.bubble.split.bcf"
+      },
+      "windows": 18154
+    },
+    "chr6": {
+      "length_bp": 170805979,
+      "matrix_dtype": "uint16",
+      "matrix_shape": [
+        6,
+        17081
+      ],
+      "qc": {
+        "distinct_source_positions": 6344197,
+        "duplicate_or_multiallelic_positions_excluded": 254922,
+        "eligible_singleton_biallelic_snv_positions": 5656215,
+        "expected_diploid_an": {
+          "AFR": 4450,
+          "AMR": 3460,
+          "EAS": 2478,
+          "EUR": 3298,
+          "MID": 774,
+          "SAS": 2282
+        },
+        "min_call_rate": 0.0,
+        "minimum_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "segregating_positions_excluded_low_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "source_records_in_callable_intervals": 8390917
+      },
+      "source_identity": {
+        "crc32c_hash": "pRo+7Q==",
+        "etag": "CKq2ruqTj5UDEAE=",
+        "generation": "1781729556405034",
+        "kind": "gcs",
+        "md5_hash": "RQm1bs00Q40VlOxSUb3RVg==",
+        "metageneration": 1,
+        "size": 5861324394,
+        "source": "gs://rw-long-reads-transfer-2026-06-17/v9/lrWGS/panel/panel/panel_bubble_split_vcf/aou_lr_phase2_v1.chr6.bubble.split.bcf"
+      },
+      "windows": 17081
+    },
+    "chr7": {
+      "length_bp": 159345973,
+      "matrix_dtype": "uint16",
+      "matrix_shape": [
+        6,
+        15935
+      ],
+      "qc": {
+        "distinct_source_positions": 5819662,
+        "duplicate_or_multiallelic_positions_excluded": 237213,
+        "eligible_singleton_biallelic_snv_positions": 5201273,
+        "expected_diploid_an": {
+          "AFR": 4450,
+          "AMR": 3460,
+          "EAS": 2478,
+          "EUR": 3298,
+          "MID": 774,
+          "SAS": 2282
+        },
+        "min_call_rate": 0.0,
+        "minimum_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "segregating_positions_excluded_low_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "source_records_in_callable_intervals": 8275269
+      },
+      "source_identity": {
+        "crc32c_hash": "z749Kg==",
+        "etag": "CJjuxeyTj5UDEAE=",
+        "generation": "1781729560983320",
+        "kind": "gcs",
+        "md5_hash": "OZyK6UD8A07Yqkb5ZoE8gA==",
+        "metageneration": 1,
+        "size": 7211593607,
+        "source": "gs://rw-long-reads-transfer-2026-06-17/v9/lrWGS/panel/panel/panel_bubble_split_vcf/aou_lr_phase2_v1.chr7.bubble.split.bcf"
+      },
+      "windows": 15935
+    },
+    "chr8": {
+      "length_bp": 145138636,
+      "matrix_dtype": "uint16",
+      "matrix_shape": [
+        6,
+        14514
+      ],
+      "qc": {
+        "distinct_source_positions": 5692684,
+        "duplicate_or_multiallelic_positions_excluded": 229228,
+        "eligible_singleton_biallelic_snv_positions": 5115479,
+        "expected_diploid_an": {
+          "AFR": 4450,
+          "AMR": 3460,
+          "EAS": 2478,
+          "EUR": 3298,
+          "MID": 774,
+          "SAS": 2282
+        },
+        "min_call_rate": 0.0,
+        "minimum_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "segregating_positions_excluded_low_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "source_records_in_callable_intervals": 7503439
+      },
+      "source_identity": {
+        "crc32c_hash": "3iLc3Q==",
+        "etag": "CLPh8+qTj5UDEAE=",
+        "generation": "1781729557541043",
+        "kind": "gcs",
+        "md5_hash": "66ngG3WIjPjOOdAG/zxI1Q==",
+        "metageneration": 1,
+        "size": 5408725105,
+        "source": "gs://rw-long-reads-transfer-2026-06-17/v9/lrWGS/panel/panel/panel_bubble_split_vcf/aou_lr_phase2_v1.chr8.bubble.split.bcf"
+      },
+      "windows": 14514
+    },
+    "chr9": {
+      "length_bp": 138394717,
+      "matrix_dtype": "uint16",
+      "matrix_shape": [
+        6,
+        13840
+      ],
+      "qc": {
+        "distinct_source_positions": 4424462,
+        "duplicate_or_multiallelic_positions_excluded": 179674,
+        "eligible_singleton_biallelic_snv_positions": 3969673,
+        "expected_diploid_an": {
+          "AFR": 4450,
+          "AMR": 3460,
+          "EAS": 2478,
+          "EUR": 3298,
+          "MID": 774,
+          "SAS": 2282
+        },
+        "min_call_rate": 0.0,
+        "minimum_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "segregating_positions_excluded_low_an": {
+          "AFR": 0,
+          "AMR": 0,
+          "EAS": 0,
+          "EUR": 0,
+          "MID": 0,
+          "SAS": 0
+        },
+        "source_records_in_callable_intervals": 5891980
+      },
+      "source_identity": {
+        "crc32c_hash": "nAJhyQ==",
+        "etag": "CNji0OuTj5UDEAE=",
+        "generation": "1781729559064920",
+        "kind": "gcs",
+        "md5_hash": "fJ6dfA2gwF0PQ7YGtoUczw==",
+        "metageneration": 1,
+        "size": 4326052516,
+        "source": "gs://rw-long-reads-transfer-2026-06-17/v9/lrWGS/panel/panel/panel_bubble_split_vcf/aou_lr_phase2_v1.chr9.bubble.split.bcf"
+      },
+      "windows": 13840
+    }
+  },
+  "hardmask": {
+    "sha256": "c6b000a0f83dda4de1edbbde0e8bfa2c0be1b5eed3526bd2d19bbec941b2a77f",
+    "source": "data/hardmask.hg38.v4.over99.bed.gz"
+  },
+  "input_provenance": {
+    "ancestry_table": {
+      "identity": {
+        "crc32c_hash": "Y+0crg==",
+        "etag": "CO/zqrXKpZUDEAE=",
+        "generation": "1782500123392495",
+        "kind": "gcs",
+        "md5_hash": "MvZdwiqRWBmFsuz8I7Wi8w==",
+        "metageneration": 1,
+        "size": 220856406,
+        "source": "gs://vwb-aou-datasets-controlled/v9/wgs/short_read/snpindel/aux/ancestry/ancestry_preds.tsv"
+      },
+      "sha256": "b1441b85e9724383c8b4588d048f3c14e8d88abde61baa3030acdd6559720a62"
+    },
+    "first_bcf": {
+      "crc32c_hash": "9R+BIw==",
+      "etag": "CK/L/eqTj5UDEAE=",
+      "generation": "1781729557702063",
+      "kind": "gcs",
+      "md5_hash": "Hhc6cPMlM+X6ZPFO9op+BA==",
+      "metageneration": 1,
+      "size": 8023276648,
+      "source": "gs://rw-long-reads-transfer-2026-06-17/v9/lrWGS/panel/panel/panel_bubble_split_vcf/aou_lr_phase2_v1.chr1.bubble.split.bcf"
+    },
+    "flagged_samples_table": {
+      "identity": {
+        "crc32c_hash": "UqYXTQ==",
+        "etag": "CK7Vk6zLpZUDEAE=",
+        "generation": "1782500372572846",
+        "kind": "gcs",
+        "md5_hash": "qBqtaCpR6qa8ghrurx1oZg==",
+        "metageneration": 1,
+        "size": 566655,
+        "source": "gs://vwb-aou-datasets-controlled/v9/wgs/short_read/snpindel/aux/qc/flagged_samples.tsv"
+      },
+      "sha256": "b9430d3c68097ace1f5536534a46f99ca3079d88f9ea18b7830e655f239a0135"
+    },
+    "hardmask": {
+      "identity": {
+        "kind": "local",
+        "mtime_ns": 1786049783067257424,
+        "size": 7402038,
+        "source": "/home/jupyter/SimulatePhase2/data/hardmask.hg38.v4.over99.bed.gz"
+      },
+      "sha256": "c6b000a0f83dda4de1edbbde0e8bfa2c0be1b5eed3526bd2d19bbec941b2a77f"
+    },
+    "panel_samples": {
+      "mode": "ordered first BCF header"
+    },
+    "population_subsample": {
+      "algorithm": "sha256-rank-v1",
+      "mode": "all QC-gated samples",
+      "samples_per_population": 0,
+      "seed": 42
+    },
+    "relatedness_table": {
+      "identity": {
+        "crc32c_hash": "8x2ZHg==",
+        "etag": "CM/Z0p7MpZUDEAE=",
+        "generation": "1782500612680911",
+        "kind": "gcs",
+        "md5_hash": "/uLNzzPiUHd20nWp1SnP8g==",
+        "metageneration": 1,
+        "size": 342914,
+        "source": "gs://vwb-aou-datasets-controlled/v9/wgs/short_read/snpindel/aux/relatedness/relatedness_flagged_samples.tsv"
+      },
+      "sha256": "168514f30a8d4d6b2fa018ff34cff6a6d4fdb7a3794b4085cc8594fd7a2dd3f7"
+    }
+  },
+  "matrix_compression": "gzip level 6 + shuffle + fletcher32",
+  "matrix_layout": "one S[population, window] array per chromosome",
+  "populations": [
+    "AFR",
+    "EUR",
+    "AMR",
+    "SAS",
+    "MID",
+    "EAS"
+  ],
+  "sample_counts": {
+    "AFR": 2225,
+    "AMR": 1730,
+    "EAS": 1239,
+    "EUR": 1649,
+    "MID": 387,
+    "SAS": 1141
+  },
+  "schema": "simulatephase2.snv-count-map/v2",
+  "segregating_site_totals": {
+    "AFR": 47229389,
+    "AMR": 43075310,
+    "EAS": 24405219,
+    "EUR": 29182339,
+    "MID": 22541238,
+    "SAS": 26235448
+  },
+  "selection": {
+    "ancestry_ids": 535662,
+    "eligible_AFR": 2225,
+    "eligible_AMR": 1730,
+    "eligible_EAS": 1239,
+    "eligible_EUR": 1649,
+    "eligible_MID": 387,
+    "eligible_SAS": 1141,
+    "excluded_unique": 1335,
+    "flagged": 48,
+    "missing_ancestry": 316,
+    "other_or_unrequested": 2745,
+    "panel": 12554,
+    "related": 1296,
+    "removed_by_population_subsample": 0,
+    "retained": 8371,
+    "retained_after_qc": 8371,
+    "sample_selection_seed": 42,
+    "samples_per_population": 0
+  },
+  "sha256": "3469426c232199cf766fb4bbd73d8ca1e90ff54d2bb0baa40d12f584410caad8",
+  "size_bytes": 1653748,
+  "stored_statistic": "S_raw_biallelic_segregating_snv_count",
+  "theta_totals": {
+    "AFR": 47229389,
+    "AMR": 43075310,
+    "EAS": 24405219,
+    "EUR": 29182339,
+    "MID": 22541238,
+    "SAS": 26235448
+  },
+  "total_windows": 287509,
+  "watterson_a_n": {
+    "AFR": 8.977762676303033,
+    "AMR": 8.726095017321864,
+    "EAS": 8.392220937893981,
+    "EUR": 8.678135553324946,
+    "MID": 7.228141404556134,
+    "SAS": 8.30980407327374
+  },
+  "watterson_theta_formula": "theta_W = S / a_n",
+  "window_size": 10000
+}

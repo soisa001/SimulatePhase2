@@ -18,6 +18,12 @@ data/*.h5
 data/*.h5.json
 data/*.h5.sha256
 data/*.h5.lock
+# The canonical, fully validated v2 map is a required launcher input and is
+# deliberately versioned; other generated HDF5 artifacts remain ignored.
+!data/snv_theta_map.10kb.h5
+!data/snv_theta_map.10kb.h5.json
+!data/snv_theta_map.10kb.h5.sha256
+!data/snv_theta_map.10kb.h5.validation.json
 mutation_map_work/
 snv_theta_map_work/
 snv_theta_bcf_cache/

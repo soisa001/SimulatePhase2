@@ -97,6 +97,11 @@ bundled hardmask, verifies the HDF5/JSON/SHA256 sidecars, and writes
 `data/snv_theta_map.10kb.h5.validation.json`. Preserve all four map files for
 the repository handoff.
 
+The canonical validated map, its generation/checksum/validation sidecars, the
+matching hardmask, and all six PHLASH MVNs are versioned on `AOU_run_opt` and
+are the launcher defaults. Simulation and compact-cutoff phases therefore need
+no external input-data paths after cloning this branch.
+
 Add `--delete-localized` to bound disk usage to the BCFs currently being
 processed, at the cost of redownloading them if a completed chromosome must be
 rebuilt. Per-chromosome `.npz` checkpoints make ordinary reruns resumable.
@@ -409,11 +414,12 @@ defaults are deliberately safe:
   workers, and 32 one-thread Gamma-SMC decoders by default.
 
 Local remains the default for both profiles. The test profile itself is also
-the CLI default, so the smallest complete end-to-end command is:
+the CLI default. With `SimulatePhase2` and a bootstrapped `gamma_smc_ts`
+checkout cloned as sibling directories, the smallest complete end-to-end
+command needs no input paths:
 
 ```bash
-uv run --frozen python -u launch_simulation.py \
-  --gamma-smc-repo "$HOME/gamma_smc_ts"
+uv run --frozen python -u launch_simulation.py
 ```
 
 Run the full workflow locally by adding `--profile full`. Submit that full
