@@ -1773,6 +1773,40 @@ def interleaved_units(
                 yield population, simulation, chromosomes[(round_index + offset) % len(chromosomes)]
 
 
+def format_eta(seconds: float) -> str:
+    """Format an estimated remaining duration at minute resolution."""
+    if not np.isfinite(seconds) or seconds < 0:
+        raise ValueError("ETA seconds must be finite and nonnegative")
+    if seconds == 0:
+        return "0m"
+    minutes = max(1, int(seconds / 60 + 0.5))
+    hours, minutes = divmod(minutes, 60)
+    days, hours = divmod(hours, 24)
+    if days:
+        return f"{days}d{hours:02d}h{minutes:02d}m"
+    if hours:
+        return f"{hours}h{minutes:02d}m"
+    return f"{minutes}m"
+
+
+def progress_eta(
+    *,
+    total: int,
+    done: int,
+    workers: int,
+    computed_count: int,
+    computed_seconds: float,
+) -> str:
+    """Estimate time remaining from cumulative newly computed unit runtimes."""
+    remaining = max(0, total - done)
+    if remaining == 0:
+        return "0m"
+    if computed_count <= 0 or computed_seconds <= 0:
+        return "estimating"
+    mean_unit_seconds = computed_seconds / computed_count
+    return format_eta(mean_unit_seconds * remaining / workers)
+
+
 def bounded_results(
     executor: ProcessPoolExecutor,
     config: dict[str, object],
@@ -2048,6 +2082,8 @@ def main(argv: list[str] | None = None) -> int:
     started = time.monotonic()
     last_heartbeat = started
     done = errors = 0
+    computed_count = 0
+    computed_seconds = 0.0
     tally: dict[str, int] = {}
     units = interleaved_units(populations, range(args.n_sims), chromosomes)
     with ProcessPoolExecutor(**executor_options) as executor:
@@ -2055,9 +2091,16 @@ def main(argv: list[str] | None = None) -> int:
             if result["status"] == "heartbeat":
                 now = time.monotonic()
                 last_heartbeat = now
+                eta = progress_eta(
+                    total=total,
+                    done=done,
+                    workers=args.workers,
+                    computed_count=computed_count,
+                    computed_seconds=computed_seconds,
+                )
                 print(
                     f"RUNNING {done:,}/{total:,}; {result['pending']} tasks in flight; "
-                    f"elapsed={(now - started) / 60:.1f} min; {tally}",
+                    f"elapsed={(now - started) / 60:.1f} min; eta {eta}; {tally}",
                     flush=True,
                 )
                 continue
@@ -2070,18 +2113,36 @@ def main(argv: list[str] | None = None) -> int:
                     f"ERROR {result['unit']}: {result['message']}\n{result['traceback']}",
                     flush=True,
                 )
-            elif status == "ok" and (tally["ok"] <= 10 or done % max(1, args.progress_every) == 0):
-                print(
-                    f"[{done:,}/{total:,}] {result['unit']} sites={result['sites']:,} "
-                    f"{result['seconds']:.1f}s retries={result['retry_attempts']} "
-                    f"skipped_windows={result['skipped_windows']}",
-                    flush=True,
-                )
+            elif status == "ok":
+                computed_count += 1
+                computed_seconds += float(result["seconds"])
+                if tally["ok"] <= 10 or done % max(1, args.progress_every) == 0:
+                    eta = progress_eta(
+                        total=total,
+                        done=done,
+                        workers=args.workers,
+                        computed_count=computed_count,
+                        computed_seconds=computed_seconds,
+                    )
+                    print(
+                        f"[{done:,}/{total:,}] {result['unit']} sites={result['sites']:,} "
+                        f"{result['seconds']:.1f}s retries={result['retry_attempts']} "
+                        f"skipped_windows={result['skipped_windows']} eta {eta}",
+                        flush=True,
+                    )
             now = time.monotonic()
             if now - last_heartbeat >= args.heartbeat_seconds:
                 last_heartbeat = now
+                eta = progress_eta(
+                    total=total,
+                    done=done,
+                    workers=args.workers,
+                    computed_count=computed_count,
+                    computed_seconds=computed_seconds,
+                )
                 print(
-                    f"RUNNING {done:,}/{total:,}; elapsed={(now - started) / 60:.1f} min; {tally}",
+                    f"RUNNING {done:,}/{total:,}; elapsed={(now - started) / 60:.1f} min; "
+                    f"eta {eta}; {tally}",
                     flush=True,
                 )
     elapsed = time.monotonic() - started

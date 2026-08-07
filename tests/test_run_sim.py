@@ -39,6 +39,44 @@ def geometry():
     return starts, ends, mask
 
 
+def test_progress_eta_uses_cumulative_computed_runtime():
+    assert run_sim.format_eta(11_160) == "3h06m"
+    assert run_sim.format_eta(90_180) == "1d01h03m"
+    assert (
+        run_sim.progress_eta(
+            total=2_200,
+            done=7,
+            workers=45,
+            computed_count=7,
+            computed_seconds=7 * 229,
+        )
+        == "3h06m"
+    )
+
+
+def test_progress_eta_handles_start_and_completion():
+    assert (
+        run_sim.progress_eta(
+            total=2_200,
+            done=0,
+            workers=45,
+            computed_count=0,
+            computed_seconds=0,
+        )
+        == "estimating"
+    )
+    assert (
+        run_sim.progress_eta(
+            total=2_200,
+            done=2_200,
+            workers=45,
+            computed_count=2_200,
+            computed_seconds=10_000,
+        )
+        == "0m"
+    )
+
+
 def toy_contract(
     target: np.ndarray,
     *,
