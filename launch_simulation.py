@@ -26,7 +26,12 @@ from phase2_map import (
     SCHEMA,
     parse_chroms,
 )
-from run_sim import DEFAULT_SIM_DIR, sha256_file
+from run_sim import (
+    DEFAULT_SIM_DIR,
+    DEFAULT_SKIP_LOW_CALLABLE_AFTER_RETRIES,
+    DEFAULT_SKIP_LOW_CALLABLE_BP,
+    sha256_file,
+)
 
 LAUNCH_SCHEMA = "simulatephase2.launch/v1"
 DEFAULT_TEST_SIM_DIR = Path("/scratch.global/soisa001/sims_eur100_test")
@@ -95,6 +100,14 @@ def parser() -> argparse.ArgumentParser:
         help="Local simulation/compact workers (default: local=4, Slurm=min(32, CPUs))",
     )
     result.add_argument("--max-pending", type=int, default=None)
+    result.add_argument(
+        "--skip-low-callable-bp", type=int, default=DEFAULT_SKIP_LOW_CALLABLE_BP
+    )
+    result.add_argument(
+        "--skip-low-callable-after-retries",
+        type=int,
+        default=DEFAULT_SKIP_LOW_CALLABLE_AFTER_RETRIES,
+    )
     result.add_argument(
         "--decode-workers",
         type=int,
@@ -202,7 +215,13 @@ def resolve(args: argparse.Namespace) -> argparse.Namespace:
         "cpus": args.cpus,
     }
     invalid = [name for name, value in positive.items() if value <= 0]
-    if invalid or args.base_seed < 0 or args.samples_per_population < 0:
+    if (
+        invalid
+        or args.base_seed < 0
+        or args.samples_per_population < 0
+        or args.skip_low_callable_bp < 0
+        or args.skip_low_callable_after_retries < 0
+    ):
         raise ValueError(f"invalid nonpositive arguments or seed: {invalid}")
     if args.mode == "slurm" and args.workers > args.cpus:
         raise ValueError("--workers cannot exceed the Slurm --cpus request")
@@ -294,6 +313,10 @@ def runner_command(args: argparse.Namespace) -> list[str]:
         str(args.workers),
         "--max-pending",
         str(args.max_pending),
+        "--skip-low-callable-bp",
+        str(args.skip_low_callable_bp),
+        "--skip-low-callable-after-retries",
+        str(args.skip_low_callable_after_retries),
         "--decode-workers",
         str(args.decode_workers),
         "--decode-threads",
@@ -340,6 +363,8 @@ def launch_contract(args: argparse.Namespace, command: list[str]) -> dict[str, o
             "samples_per_population": args.samples_per_population,
             "workers": args.workers,
             "max_pending": args.max_pending,
+            "skip_low_callable_bp": args.skip_low_callable_bp,
+            "skip_low_callable_after_retries": args.skip_low_callable_after_retries,
             "decode_workers": args.decode_workers,
             "decode_threads": args.decode_threads,
             "p_values": args.p_values,

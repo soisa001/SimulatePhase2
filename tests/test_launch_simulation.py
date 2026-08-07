@@ -42,10 +42,14 @@ def test_test_profile_is_local_eur100_with_deep_check(tmp_path: Path) -> None:
     assert args.n_sims == 100
     assert args.workers == 4
     assert args.decode_workers == 4
+    assert args.skip_low_callable_bp == 50
+    assert args.skip_low_callable_after_retries == 5
     assert args.deep_completeness_check is True
     command = launch_simulation.runner_command(args)
     assert command[command.index("--cutoff-mode") + 1] == "both"
     assert command[command.index("--chroms") + 1] == "1-22"
+    assert command[command.index("--skip-low-callable-bp") + 1] == "50"
+    assert command[command.index("--skip-low-callable-after-retries") + 1] == "5"
     assert "--deep-completeness-check" in command
 
 

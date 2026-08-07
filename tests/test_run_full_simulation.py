@@ -28,6 +28,9 @@ def test_default_full_runner_is_three_phases_with_compact_cutoffs(tmp_path) -> N
     assert "generate_cutoff_gamma_smc.py" not in " ".join(
         value for _, command in commands for value in command
     )
+    simulate = dict(commands)["phase2_simulate"]
+    assert simulate[simulate.index("--skip-low-callable-bp") + 1] == "50"
+    assert simulate[simulate.index("--skip-low-callable-after-retries") + 1] == "5"
 
 
 def test_gamma_cutoff_mode_runs_completeness_first(tmp_path) -> None:
@@ -56,3 +59,5 @@ def test_repository_inputs_are_defaults() -> None:
     assert args.mask == repository / "data" / "hardmask.hg38.v4.over99.bed.gz"
     assert args.mvn_dir == repository / "mvn"
     assert args.gamma_smc_repo == repository.parent / "gamma_smc_ts"
+    assert args.skip_low_callable_bp == 50
+    assert args.skip_low_callable_after_retries == 5

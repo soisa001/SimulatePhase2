@@ -69,6 +69,10 @@ def validate_completed_unit(
         size_bytes = int(metadata.get("size_bytes", -1))
         target_sites = int(metadata.get("target_sites", -1))
         realized_sites = int(metadata.get("realized_sites", -2))
+        requested_target_sites = int(metadata.get("requested_target_sites", target_sites))
+        skipped_target_sites = int(
+            metadata.get("skipped_target_sites", requested_target_sites - target_sites)
+        )
         contract_simulation = int(contract.get("simulation", -1))  # type: ignore[union-attr]
         contract_chromosome = canonical_chromosome(  # type: ignore[union-attr]
             contract.get("chromosome", "")
@@ -76,6 +80,19 @@ def validate_completed_unit(
     except (AttributeError, TypeError, ValueError) as error:
         raise ValueError(f"invalid completion sidecar fields: {sidecar}") from error
     signature = metadata.get("signature")
+    skipped_windows = metadata.get("skipped_windows", [])
+    policy_metadata_valid = isinstance(skipped_windows, list)
+    if policy_metadata_valid:
+        try:
+            window_ids = [int(record["window"]) for record in skipped_windows]
+            skipped_from_records = sum(int(record["requested_sites"]) for record in skipped_windows)
+            policy_metadata_valid = (
+                len(window_ids) == len(set(window_ids))
+                and all(window >= 0 for window in window_ids)
+                and skipped_from_records == skipped_target_sites
+            )
+        except (KeyError, TypeError, ValueError):
+            policy_metadata_valid = False
     valid = (
         metadata.get("status") == "complete"
         and isinstance(contract, dict)
@@ -87,7 +104,10 @@ def validate_completed_unit(
         and all(character in "0123456789abcdef" for character in signature.lower())
         and size_bytes == path.stat().st_size
         and target_sites >= 0
+        and requested_target_sites >= target_sites
+        and skipped_target_sites == requested_target_sites - target_sites
         and realized_sites == target_sites
+        and policy_metadata_valid
     )
     if not valid:
         raise ValueError(f"invalid or stale completion sidecar: {sidecar}")

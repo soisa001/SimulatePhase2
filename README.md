@@ -226,7 +226,8 @@ content-addressed `<demography-cache>/mask_snapshots` cache (or
 Before starting the worker pool, the launcher also creates
 `simulation_contract.json` at the simulation root under a cross-process lock.
 It fixes the algorithm and software versions, map SHA256, rates, retry limit,
-and base seed, plus each population's demography key and diploid sample count.
+low-callability skip thresholds, and base seed, plus each population's
+demography key and diploid sample count.
 Compatible launchers may run any existing population subset or atomically add
 new populations; a global mismatch or conflicting definition of an existing
 population is rejected before simulation. A directory containing `.tsz`
@@ -244,6 +245,8 @@ Simulation defaults are:
 - initial candidate mutation rate `5e-8`
 - retry candidate mutation rate `1e-7`, restricted to deficient windows
 - at most eight retry draws, always at `1e-7`
+- after the sixth retry (strictly more than five), a still-deficient window with
+  fewer than 50 callable bp is skipped and assigned zero mutations
 - all 10,000 demographic epochs per current PHLASH MVN draw (or the complete
   available grid for shorter legacy artifacts)
 - deterministic base seed 42
@@ -260,10 +263,15 @@ runtime estimate.
 
 The runner retains useful candidates from the first draw, excludes every
 masked or recurrent site, prevents retry collisions, and writes `.tsz` files
-atomically. Before publication, tskit independently verifies that every site
-is biallelic and segregating and that the complete per-window vector equals
-the requested `S` vector. Exhausted retries are errors and never produce a
-completed artifact.
+atomically. If a window remains deficient after the sixth retry and has
+strictly fewer than 50 callable bp, all mutations already retained in that
+window are discarded and its policy-adjusted target becomes zero. This is
+controlled by `--skip-low-callable-after-retries 5` and
+`--skip-low-callable-bp 50`; setting the latter to zero disables the exception.
+Before publication, tskit independently verifies that every retained site is
+biallelic and segregating and that the complete per-window vector equals the
+policy-adjusted target. Exhausted retries in any other window remain fatal and
+never produce a completed artifact.
 
 At simulation time the runner computes the effective Watterson density in each
 window as `theta_W / callable_bp = S / (a_n,map * callable_bp)`.
@@ -271,13 +279,19 @@ window as `theta_W / callable_bp = S / (a_n,map * callable_bp)`.
 With the default sample count, the target vector is exactly the stored raw `S`.
 If `--samples-per-population N` is nonzero, it deterministically rescales each
 window to `round_half_up(S * a_n,N / a_n,map)`. The map sample count, simulation
-sample count, both `a_n` values, scale, callable-base total, raw-S total, target
-total, and effective-density summary are recorded in the simulation contract
-and completion sidecar. This is a Watterson approximation when source sites
-have missing genotypes; the original counts remain unchanged in the map.
+sample count, both `a_n` values, scale, callable-base total, raw-S total,
+requested and policy-adjusted target totals, skipped-window records, and
+effective-density summary are recorded in the simulation contract and
+completion sidecar. This is a Watterson approximation when source sites have
+missing genotypes; the original counts remain unchanged in the map.
 
-Exact thinning intentionally conditions each simulated window on the observed
-segregating-site count. This preserves the candidate mutations' conditional
+The skip policy is part of the signed simulation-root and unit contracts.
+Simulation roots created by an older contract are intentionally rejected;
+reuse the compatible demography cache but choose a new `--sim-dir`.
+
+Outside explicitly skipped low-callability windows, exact thinning intentionally
+conditions each simulated window on the observed segregating-site count. This
+preserves the candidate mutations' conditional
 frequency distribution but removes ordinary between-replicate Poisson variance
 in the count itself. Use an unconditioned mutation-rate model instead if that
 count variance is part of the scientific target.

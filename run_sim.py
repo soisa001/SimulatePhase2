@@ -5,7 +5,9 @@
 msprime mutation probability.  For each chromosome this runner creates
 candidate mutations at 5e-8, removes masked/recurrent/non-segregating sites,
 thins to the per-window targets, and fills only deficient windows with repeated
-1e-7 candidate draws.  An output is published only after exact validation.
+1e-7 candidate draws.  A still-deficient window is explicitly skipped after
+more than five retries when it contains fewer than 50 callable bases; all other
+windows must pass exact validation before an output is published.
 """
 
 # ruff: noqa: E402
@@ -67,14 +69,16 @@ from simulation_outputs import quick_tsz_archive
 DEFAULT_RECOMBINATION_RATE = 1e-8
 DEFAULT_INITIAL_RATE = 5e-8
 DEFAULT_RETRY_RATE = 1e-7
+DEFAULT_SKIP_LOW_CALLABLE_BP = 50
+DEFAULT_SKIP_LOW_CALLABLE_AFTER_RETRIES = 5
 DEFAULT_SIM_DIR = Path("/scratch.global/soisa001/sims")
 DEFAULT_DEMOGRAPHY_CACHE = DEFAULT_SIM_DIR / "demographies"
 DEFAULT_DEMOGRAPHY_EPOCHS = 10_000
-ALGORITHM_VERSION = "simulatephase2.calibrated-snv/v5-runtime-mask"
+ALGORITHM_VERSION = "simulatephase2.calibrated-snv/v6-low-callable-skip"
 DETERMINISTIC_PROVENANCE_TIMESTAMP = "1970-01-01T00:00:00Z"
-SIM_ROOT_CONTRACT_SCHEMA = "simulatephase2.sim-root-contract/v2"
+SIM_ROOT_CONTRACT_SCHEMA = "simulatephase2.sim-root-contract/v3"
 SIM_ROOT_CONTRACT_NAME = "simulation_contract.json"
-TARGET_POLICY = "raw-S-to-target-by-watterson-a_n-round-half-up/v1"
+TARGET_POLICY = "raw-S-watterson-rescale-with-low-callable-retry-skip/v2"
 SEED_MODULUS = 4_294_967_291  # largest prime below 2**32
 SEED_CHANNELS = 256
 
@@ -350,6 +354,10 @@ def requested_sim_root_contract(config: dict[str, object]) -> dict[str, object]:
             "initial_rate": float(config["initial_rate"]),
             "retry_rate": float(config["retry_rate"]),
             "max_retries": int(config["max_retries"]),
+            "skip_low_callable_bp": int(config["skip_low_callable_bp"]),
+            "skip_low_callable_after_retries": int(
+                config["skip_low_callable_after_retries"]
+            ),
             "base_seed": int(config["base_seed"]),
         },
         "populations": populations,
@@ -983,6 +991,67 @@ def retain_candidate_columns(tables: TableView, keep_sites: np.ndarray) -> Retai
     )
 
 
+def subset_retained_columns(
+    retained: RetainedCandidateColumns, keep_sites: np.ndarray
+) -> RetainedCandidateColumns:
+    """Subset compact one-site/one-mutation columns without rebuilding a tree sequence."""
+    keep_sites = np.asarray(keep_sites, dtype=bool)
+    if keep_sites.shape != (retained.size,):
+        raise ValueError("retained-column selection mask has the wrong shape")
+    if np.all(keep_sites):
+        return retained
+    ancestral_state, ancestral_state_offset = tskit.keep_with_offset(
+        keep_sites,
+        retained.site_ancestral_state,
+        retained.site_ancestral_state_offset,
+    )
+    site_metadata, site_metadata_offset = tskit.keep_with_offset(
+        keep_sites,
+        retained.site_metadata,
+        retained.site_metadata_offset,
+    )
+    derived_state, derived_state_offset = tskit.keep_with_offset(
+        keep_sites,
+        retained.mutation_derived_state,
+        retained.mutation_derived_state_offset,
+    )
+    mutation_metadata, mutation_metadata_offset = tskit.keep_with_offset(
+        keep_sites,
+        retained.mutation_metadata,
+        retained.mutation_metadata_offset,
+    )
+    return RetainedCandidateColumns(
+        site_position=retained.site_position[keep_sites].copy(),
+        site_ancestral_state=np.asarray(ancestral_state),
+        site_ancestral_state_offset=np.asarray(ancestral_state_offset),
+        site_metadata=np.asarray(site_metadata),
+        site_metadata_offset=np.asarray(site_metadata_offset),
+        mutation_node=retained.mutation_node[keep_sites].copy(),
+        mutation_time=retained.mutation_time[keep_sites].copy(),
+        mutation_derived_state=np.asarray(derived_state),
+        mutation_derived_state_offset=np.asarray(derived_state_offset),
+        mutation_parent=retained.mutation_parent[keep_sites].copy(),
+        mutation_metadata=np.asarray(mutation_metadata),
+        mutation_metadata_offset=np.asarray(mutation_metadata_offset),
+        site_metadata_schema=retained.site_metadata_schema,
+        mutation_metadata_schema=retained.mutation_metadata_schema,
+    )
+
+
+def exclude_retained_windows(
+    retained: RetainedCandidateColumns,
+    windows: set[int],
+    window_size: int,
+) -> tuple[RetainedCandidateColumns, int]:
+    """Remove every retained candidate from policy-skipped windows."""
+    if not windows or retained.size == 0:
+        return retained, 0
+    site_windows = retained.site_position.astype(np.int64) // int(window_size)
+    keep_sites = ~np.isin(site_windows, np.asarray(sorted(windows), dtype=np.int64))
+    removed = int(retained.size - keep_sites.sum())
+    return subset_retained_columns(retained, keep_sites), removed
+
+
 def append_retained_columns(
     tables: tskit.TableCollection, retained: RetainedCandidateColumns
 ) -> None:
@@ -1103,9 +1172,14 @@ def calibrate_mutations(
     target: np.ndarray,
     starts: np.ndarray,
     ends: np.ndarray,
+    callable_bp: np.ndarray,
     mask: np.ndarray,
     unit_contract: dict[str, object],
-) -> tuple[tskit.TreeSequence, dict[str, int]]:
+) -> tuple[tskit.TreeSequence, dict[str, object]]:
+    target = np.asarray(target, dtype=np.int64)
+    callable_bp = np.asarray(callable_bp, dtype=np.int64)
+    if callable_bp.shape != target.shape or np.any(callable_bp < 0):
+        raise ValueError("callable-bp vector must be nonnegative and match the target")
     window_size = int(ends[0] - starts[0])
     length_bp = int(ends[-1])
     contract_geometry = (
@@ -1122,9 +1196,24 @@ def calibrate_mutations(
     initial_rate = float(unit_contract["initial_rate"])
     retry_rate = float(unit_contract["retry_rate"])
     max_retries = int(unit_contract["max_retries"])
+    skip_low_callable_bp = int(unit_contract["skip_low_callable_bp"])
+    skip_low_callable_after_retries = int(
+        unit_contract["skip_low_callable_after_retries"]
+    )
+    if skip_low_callable_bp < 0 or skip_low_callable_after_retries < 0:
+        raise ValueError("low-callability skip thresholds must be nonnegative")
     first_seed, thinning_seed, retry_seeds = contract_random_seeds(unit_contract, max_retries)
     if int(target.sum()) == 0:
-        stats = {"initial_retained": 0, "retry_attempts": 0, "retry_added": 0}
+        stats: dict[str, object] = {
+            "initial_retained": 0,
+            "retry_attempts": 0,
+            "retry_added": 0,
+            "requested_target_sites": 0,
+            "target_sites": 0,
+            "skipped_target_sites": 0,
+            "skipped_retained_sites": 0,
+            "skipped_windows": [],
+        }
         tables = ancestry.dump_tables()
         add_unit_provenance(tables, unit_contract, **stats)
         result = tables.tree_sequence()
@@ -1164,6 +1253,8 @@ def calibrate_mutations(
     gc.collect()
     retry_added = 0
     attempts = 0
+    effective_target = target.copy()
+    skipped_windows: list[dict[str, int]] = []
     while needed and attempts < max_retries:
         attempts += 1
         retry_map = mutation_rate_map(
@@ -1195,18 +1286,61 @@ def calibrate_mutations(
         if added:
             retained_chunks.append(retain_candidate_columns(retry_tables, retry_keep))
         del retry_tables, retry_keep, retry_ts
+        if attempts > skip_low_callable_after_retries:
+            to_skip = sorted(
+                window
+                for window in needed
+                if int(callable_bp[window]) < skip_low_callable_bp
+            )
+            for window in to_skip:
+                requested_sites = int(target[window])
+                remaining_deficit = int(needed.pop(window))
+                retained_before_skip = requested_sites - remaining_deficit
+                skipped_windows.append(
+                    {
+                        "window": int(window),
+                        "start": int(starts[window]),
+                        "end": int(ends[window]),
+                        "callable_bp": int(callable_bp[window]),
+                        "requested_sites": requested_sites,
+                        "retained_sites_before_skip": retained_before_skip,
+                        "remaining_deficit": remaining_deficit,
+                        "after_retry_attempt": attempts,
+                    }
+                )
+                effective_target[window] = 0
+                occupied.pop(window, None)
     if needed:
         preview = ", ".join(f"w{window}:{count}" for window, count in list(needed.items())[:10])
         raise TargetDeficit(
             f"{len(needed)} windows remain short after {max_retries} retries at "
             f"{retry_rate:g}; deficits: {preview}"
         )
-    del active, needed, occupied, rng
+    skipped_set = {record["window"] for record in skipped_windows}
+    skipped_retained_sites = 0
+    filtered_chunks: list[RetainedCandidateColumns] = []
+    for index, retained in enumerate(retained_chunks):
+        filtered, removed = exclude_retained_windows(retained, skipped_set, window_size)
+        skipped_retained_sites += removed
+        if index == 0:
+            initial_retained -= removed
+        else:
+            retry_added -= removed
+        if filtered.size:
+            filtered_chunks.append(filtered)
+    expected_discarded = sum(
+        record["retained_sites_before_skip"] for record in skipped_windows
+    )
+    if skipped_retained_sites != expected_discarded:
+        raise RuntimeError(
+            "retained-site accounting disagrees with low-callability window skips"
+        )
+    del active, needed, occupied, rng, retained_chunks
     gc.collect()
     tables = ancestry.dump_tables()
-    for retained in retained_chunks:
+    for retained in filtered_chunks:
         append_retained_columns(tables, retained)
-    del retained_chunks
+    del filtered_chunks
     tables.sort()
     tables.build_index()
     tables.compute_mutation_parents()
@@ -1214,12 +1348,19 @@ def calibrate_mutations(
         "initial_retained": initial_retained,
         "retry_attempts": attempts,
         "retry_added": retry_added,
+        "requested_target_sites": int(target.sum()),
+        "target_sites": int(effective_target.sum()),
+        "skipped_target_sites": int(target.sum() - effective_target.sum()),
+        "skipped_retained_sites": skipped_retained_sites,
+        "skipped_windows": skipped_windows,
     }
+    if initial_retained + retry_added != int(effective_target.sum()):
+        raise RuntimeError("retained-site accounting differs from the policy-adjusted target")
     add_unit_provenance(tables, unit_contract, **stats)
     result = tables.tree_sequence()
     validate_calibrated(
         result,
-        target=target,
+        target=effective_target,
         starts=starts,
         ends=ends,
         mask=mask,
@@ -1282,6 +1423,10 @@ def unit_signature(
         "initial_rate": float(config["initial_rate"]),
         "retry_rate": float(config["retry_rate"]),
         "max_retries": max_retries,
+        "skip_low_callable_bp": int(config["skip_low_callable_bp"]),
+        "skip_low_callable_after_retries": int(
+            config["skip_low_callable_after_retries"]
+        ),
         "seeds": seeds,
     }
     signature = contract_signature(contract)
@@ -1316,6 +1461,11 @@ def add_unit_provenance(
     initial_retained: int,
     retry_attempts: int,
     retry_added: int,
+    requested_target_sites: int,
+    target_sites: int,
+    skipped_target_sites: int,
+    skipped_retained_sites: int,
+    skipped_windows: list[dict[str, int]],
 ) -> None:
     record = {
         "schema_version": "1.0.0",
@@ -1328,7 +1478,12 @@ def add_unit_provenance(
                 "initial_retained": int(initial_retained),
                 "retry_attempts": int(retry_attempts),
                 "retry_added": int(retry_added),
-                "realized_sites": int(initial_retained + retry_added),
+                "requested_target_sites": int(requested_target_sites),
+                "target_sites": int(target_sites),
+                "realized_sites": int(target_sites),
+                "skipped_target_sites": int(skipped_target_sites),
+                "skipped_retained_sites": int(skipped_retained_sites),
+                "skipped_windows": skipped_windows,
             },
         },
     }
@@ -1362,6 +1517,66 @@ def deep_validate_file(
         return False
 
 
+def policy_adjusted_target_from_metadata(
+    target: np.ndarray,
+    callable_bp: np.ndarray,
+    metadata: dict[str, object],
+) -> np.ndarray:
+    """Reconstruct and validate the target used by a completed unit."""
+    target = np.asarray(target, dtype=np.int64)
+    callable_bp = np.asarray(callable_bp, dtype=np.int64)
+    if callable_bp.shape != target.shape:
+        raise ValueError("callable-bp vector does not match target")
+    target_sites = int(metadata.get("target_sites", -1))
+    requested_target_sites = int(metadata.get("requested_target_sites", target_sites))
+    if requested_target_sites != int(target.sum()):
+        raise ValueError("completion sidecar requested-target total is stale")
+    raw_records = metadata.get("skipped_windows", [])
+    if not isinstance(raw_records, list):
+        raise ValueError("completion sidecar skipped-windows field is not a list")
+    contract = metadata.get("contract")
+    if raw_records and not isinstance(contract, dict):
+        raise ValueError("completion sidecar lacks a contract for skipped windows")
+    skip_bp = int(contract.get("skip_low_callable_bp", -1)) if isinstance(contract, dict) else -1
+    skip_after = (
+        int(contract.get("skip_low_callable_after_retries", -1))
+        if isinstance(contract, dict)
+        else -1
+    )
+    adjusted = target.copy()
+    seen: set[int] = set()
+    for raw_record in raw_records:
+        if not isinstance(raw_record, dict):
+            raise ValueError("completion sidecar has an invalid skipped-window record")
+        window = int(raw_record.get("window", -1))
+        if not 0 <= window < len(target) or window in seen:
+            raise ValueError("completion sidecar has an invalid or duplicate skipped window")
+        seen.add(window)
+        requested_sites = int(raw_record.get("requested_sites", -1))
+        retained = int(raw_record.get("retained_sites_before_skip", -1))
+        deficit = int(raw_record.get("remaining_deficit", -1))
+        record_callable_bp = int(raw_record.get("callable_bp", -1))
+        retry_attempt = int(raw_record.get("after_retry_attempt", -1))
+        if (
+            requested_sites != int(target[window])
+            or requested_sites <= 0
+            or retained < 0
+            or deficit <= 0
+            or retained + deficit != requested_sites
+            or record_callable_bp != int(callable_bp[window])
+            or record_callable_bp >= skip_bp
+            or retry_attempt <= skip_after
+        ):
+            raise ValueError("completion sidecar skipped-window policy record is inconsistent")
+        adjusted[window] = 0
+    skipped_target_sites = int(target.sum() - adjusted.sum())
+    if int(metadata.get("skipped_target_sites", skipped_target_sites)) != skipped_target_sites:
+        raise ValueError("completion sidecar skipped-target total is inconsistent")
+    if target_sites != int(adjusted.sum()):
+        raise ValueError("completion sidecar policy-adjusted target total is inconsistent")
+    return adjusted
+
+
 def existing_complete(
     output: Path,
     sidecar: Path,
@@ -1369,6 +1584,7 @@ def existing_complete(
     *,
     verify: bool,
     target: np.ndarray,
+    callable_bp: np.ndarray,
     starts: np.ndarray,
     ends: np.ndarray,
     mask: np.ndarray,
@@ -1378,11 +1594,12 @@ def existing_complete(
         return False
     try:
         metadata = json.loads(sidecar.read_text(encoding="utf-8"))
+        adjusted_target = policy_adjusted_target_from_metadata(target, callable_bp, metadata)
         quick = (
             metadata.get("signature") == signature
             and metadata.get("status") == "complete"
             and int(metadata.get("size_bytes", -1)) == output.stat().st_size
-            and int(metadata.get("target_sites", -1)) == int(target.sum())
+            and int(metadata.get("realized_sites", -1)) == int(adjusted_target.sum())
         )
     except Exception:
         return False
@@ -1391,7 +1608,7 @@ def existing_complete(
         not verify
         or deep_validate_file(
             output,
-            target=target,
+            target=adjusted_target,
             starts=starts,
             ends=ends,
             mask=mask,
@@ -1452,6 +1669,7 @@ def simulate_unit(payload: tuple[dict[str, object], str, int, str]) -> dict[str,
                 signature,
                 verify=bool(config["verify_existing"]),
                 target=target,
+                callable_bp=callable_bp,
                 starts=starts,
                 ends=ends,
                 mask=mask,
@@ -1481,6 +1699,7 @@ def simulate_unit(payload: tuple[dict[str, object], str, int, str]) -> dict[str,
                 target=target,
                 starts=starts,
                 ends=ends,
+                callable_bp=callable_bp,
                 mask=mask,
                 unit_contract=contract,
             )
@@ -1500,7 +1719,6 @@ def simulate_unit(payload: tuple[dict[str, object], str, int, str]) -> dict[str,
                 "signature": signature,
                 "contract": contract,
                 "source_segregating_sites": int(raw_s.sum()),
-                "target_sites": int(target.sum()),
                 "realized_sites": int(calibrated.num_sites),
                 "callable_bp": int(callable_bp.sum()),
                 "effective_theta_w_per_callable_bp": {
@@ -1532,6 +1750,7 @@ def simulate_unit(payload: tuple[dict[str, object], str, int, str]) -> dict[str,
             "sites": int(metadata["realized_sites"]),
             "seconds": float(metadata["seconds"]),
             "retry_attempts": int(metadata["retry_attempts"]),
+            "skipped_windows": len(metadata["skipped_windows"]),
         }
     except Exception as error:
         return {
@@ -1643,6 +1862,24 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--initial-rate", type=float, default=DEFAULT_INITIAL_RATE)
     result.add_argument("--retry-rate", type=float, default=DEFAULT_RETRY_RATE)
     result.add_argument("--max-retries", type=int, default=8)
+    result.add_argument(
+        "--skip-low-callable-bp",
+        type=int,
+        default=DEFAULT_SKIP_LOW_CALLABLE_BP,
+        help=(
+            "Skip a still-deficient window when callable bp is strictly below this value "
+            f"(default: {DEFAULT_SKIP_LOW_CALLABLE_BP}; 0 disables)"
+        ),
+    )
+    result.add_argument(
+        "--skip-low-callable-after-retries",
+        type=int,
+        default=DEFAULT_SKIP_LOW_CALLABLE_AFTER_RETRIES,
+        help=(
+            "Skip an eligible low-callability window only after strictly more than this many "
+            f"retry draws (default: {DEFAULT_SKIP_LOW_CALLABLE_AFTER_RETRIES})"
+        ),
+    )
     result.add_argument("--base-seed", type=int, default=42)
     result.add_argument("--verify-existing", action="store_true")
     result.add_argument("--fresh", action="store_true")
@@ -1666,6 +1903,8 @@ def main(argv: list[str] | None = None) -> int:
     invalid = [name for name, value in positive.items() if value <= 0]
     if invalid or args.max_retries < 0:
         raise SystemExit(f"invalid nonpositive arguments: {invalid}")
+    if args.skip_low_callable_bp < 0 or args.skip_low_callable_after_retries < 0:
+        raise SystemExit("low-callability skip thresholds must be nonnegative")
     if args.max_retries > SEED_CHANNELS - 3:
         raise SystemExit(f"--max-retries must not exceed {SEED_CHANNELS - 3}")
     if args.base_seed < 0:
@@ -1768,6 +2007,8 @@ def main(argv: list[str] | None = None) -> int:
         "initial_rate": args.initial_rate,
         "retry_rate": args.retry_rate,
         "max_retries": args.max_retries,
+        "skip_low_callable_bp": args.skip_low_callable_bp,
+        "skip_low_callable_after_retries": args.skip_low_callable_after_retries,
         "verify_existing": args.verify_existing,
         "fresh": args.fresh,
     }
@@ -1793,7 +2034,9 @@ def main(argv: list[str] | None = None) -> int:
         f"simulation_samples={config['sample_counts']} chroms={chromosomes}\n"
         f"S_scales={{{scale_summary}}}\n"
         f"units={total:,} workers={args.workers} max_pending={max_pending} "
-        f"mu={args.initial_rate:g} retry_mu={args.retry_rate:g} retries={args.max_retries}",
+        f"mu={args.initial_rate:g} retry_mu={args.retry_rate:g} retries={args.max_retries}\n"
+        f"low_callable_skip=callable_bp<{args.skip_low_callable_bp} "
+        f"after_retries>{args.skip_low_callable_after_retries}",
         flush=True,
     )
 
@@ -1830,7 +2073,8 @@ def main(argv: list[str] | None = None) -> int:
             elif status == "ok" and (tally["ok"] <= 10 or done % max(1, args.progress_every) == 0):
                 print(
                     f"[{done:,}/{total:,}] {result['unit']} sites={result['sites']:,} "
-                    f"{result['seconds']:.1f}s retries={result['retry_attempts']}",
+                    f"{result['seconds']:.1f}s retries={result['retry_attempts']} "
+                    f"skipped_windows={result['skipped_windows']}",
                     flush=True,
                 )
             now = time.monotonic()

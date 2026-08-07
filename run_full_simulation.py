@@ -19,7 +19,12 @@ from phase2_map import (
     DEFAULT_MVN_DIR,
     DEFAULT_POPS,
 )
-from run_sim import DEFAULT_DEMOGRAPHY_CACHE, DEFAULT_SIM_DIR
+from run_sim import (
+    DEFAULT_DEMOGRAPHY_CACHE,
+    DEFAULT_SIM_DIR,
+    DEFAULT_SKIP_LOW_CALLABLE_AFTER_RETRIES,
+    DEFAULT_SKIP_LOW_CALLABLE_BP,
+)
 
 
 def parser() -> argparse.ArgumentParser:
@@ -45,6 +50,14 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--samples-per-population", type=int, default=0)
     result.add_argument("--workers", type=int, default=4)
     result.add_argument("--max-pending", type=int, default=0)
+    result.add_argument(
+        "--skip-low-callable-bp", type=int, default=DEFAULT_SKIP_LOW_CALLABLE_BP
+    )
+    result.add_argument(
+        "--skip-low-callable-after-retries",
+        type=int,
+        default=DEFAULT_SKIP_LOW_CALLABLE_AFTER_RETRIES,
+    )
     result.add_argument("--p-values", default="0.01,0.05")
     result.add_argument("--window-size", type=int, default=10_000)
     result.add_argument("--threshold-years", type=float, default=4_500.0)
@@ -109,6 +122,10 @@ def phase_commands(args: argparse.Namespace, executable: str) -> list[tuple[str,
         str(args.workers),
         "--max-pending",
         str(args.max_pending),
+        "--skip-low-callable-bp",
+        str(args.skip_low_callable_bp),
+        "--skip-low-callable-after-retries",
+        str(args.skip_low_callable_after_retries),
     ]
     if args.mask:
         simulate.extend(["--mask", str(args.mask)])
@@ -252,7 +269,12 @@ def main(argv: list[str] | None = None) -> int:
         args.decode_workers,
         args.decode_threads,
     )
-    if any(value <= 0 for value in positive) or args.base_seed < 0:
+    if (
+        any(value <= 0 for value in positive)
+        or args.base_seed < 0
+        or args.skip_low_callable_bp < 0
+        or args.skip_low_callable_after_retries < 0
+    ):
         raise SystemExit("counts/epochs/workers must be positive and seed nonnegative")
     args.map = args.map.expanduser().resolve()
     args.mask = args.mask.expanduser().resolve() if args.mask is not None else None

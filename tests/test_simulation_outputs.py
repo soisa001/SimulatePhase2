@@ -63,6 +63,7 @@ def test_quick_completion_rejects_truncated_tsz_even_if_size_sidecar_is_changed(
         signature,
         verify=False,
         target=np.empty(0, dtype=np.int64),
+        callable_bp=np.empty(0, dtype=np.int64),
         starts=np.empty(0, dtype=np.int64),
         ends=np.empty(0, dtype=np.int64),
         mask=np.empty((0, 2), dtype=np.int64),

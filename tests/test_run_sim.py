@@ -15,7 +15,8 @@ import tszip
 
 import prepare_demographies
 import run_sim
-from phase2_map import SCHEMA, watterson_a_n
+from phase2_map import SCHEMA, callable_from_mask, watterson_a_n
+from simulation_outputs import validate_completed_unit
 
 
 def toy_ancestry(length: int = 35_000, samples: int = 10):
@@ -45,6 +46,11 @@ def toy_contract(
     retry_rate: float,
     max_retries: int,
     samples: int = 10,
+    skip_low_callable_bp: int = run_sim.DEFAULT_SKIP_LOW_CALLABLE_BP,
+    skip_low_callable_after_retries: int = run_sim.DEFAULT_SKIP_LOW_CALLABLE_AFTER_RETRIES,
+    length_bp: int = 35_000,
+    window_size: int = 10_000,
+    callable_bp: int = 34_500,
 ) -> dict[str, object]:
     config = {
         "map_sha256": "toy-map",
@@ -55,6 +61,8 @@ def toy_contract(
         "initial_rate": initial_rate,
         "retry_rate": retry_rate,
         "max_retries": max_retries,
+        "skip_low_callable_bp": skip_low_callable_bp,
+        "skip_low_callable_after_retries": skip_low_callable_after_retries,
     }
     _, contract = run_sim.unit_signature(
         config=config,
@@ -62,9 +70,9 @@ def toy_contract(
         simulation=0,
         chromosome="chr1",
         sample_count=samples,
-        length_bp=35_000,
-        window_size=10_000,
-        callable_bp=34_500,
+        length_bp=length_bp,
+        window_size=window_size,
+        callable_bp=callable_bp,
         source_sites=int(target.sum()),
         target_sites=int(target.sum()),
         map_sample_count=samples,
@@ -98,6 +106,8 @@ def test_simulation_defaults_use_full_mvn_grid_and_scratch_root() -> None:
     assert args.n_sims == 1_000
     assert args.demography_epochs == 10_000
     assert args.base_seed == 42
+    assert args.skip_low_callable_bp == 50
+    assert args.skip_low_callable_after_retries == 5
     assert args.sim_dir == Path("/scratch.global/soisa001/sims")
     assert args.demography_cache == Path("/scratch.global/soisa001/sims/demographies")
     cache_args = prepare_demographies.parser().parse_args([])
@@ -169,6 +179,7 @@ def test_exact_calibration_with_forced_retry() -> None:
         target=target,
         starts=starts,
         ends=ends,
+        callable_bp=callable_from_mask(starts, ends, mask),
         mask=mask,
         unit_contract=toy_contract(target, initial_rate=1e-8, retry_rate=1e-7, max_retries=8),
     )
@@ -213,6 +224,7 @@ def test_calibration_dumps_only_mutation_free_ancestry(
         target=target,
         starts=starts,
         ends=ends,
+        callable_bp=callable_from_mask(starts, ends, mask),
         mask=mask,
         unit_contract=toy_contract(target, initial_rate=1e-8, retry_rate=1e-7, max_retries=8),
     )
@@ -232,8 +244,147 @@ def test_retry_exhaustion_is_fatal() -> None:
             target=target,
             starts=starts,
             ends=ends,
+            callable_bp=callable_from_mask(starts, ends, mask),
             mask=mask,
             unit_contract=toy_contract(target, initial_rate=1e-12, retry_rate=1e-12, max_retries=0),
+        )
+
+
+def test_sixth_retry_skips_entire_low_callable_window(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ancestry = toy_ancestry(length=10_000, samples=2)
+    starts = np.array([0], dtype=np.int64)
+    ends = np.array([10_000], dtype=np.int64)
+    mask = np.array([[0, 9_951]], dtype=np.int64)
+    callable_bp = callable_from_mask(starts, ends, mask)
+    target = np.array([2], dtype=np.int64)
+    calls = 0
+
+    def controlled_mutations(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls != 1:
+            return ancestry
+        tables = ancestry.dump_tables()
+        site = tables.sites.add_row(position=9_951, ancestral_state="0")
+        tables.mutations.add_row(
+            site=site,
+            node=int(ancestry.samples()[0]),
+            derived_state="1",
+        )
+        tables.sort()
+        return tables.tree_sequence()
+
+    monkeypatch.setattr(msprime, "sim_mutations", controlled_mutations)
+    contract = toy_contract(
+        target,
+        initial_rate=1e-8,
+        retry_rate=1e-7,
+        max_retries=8,
+        samples=2,
+        length_bp=10_000,
+        callable_bp=49,
+    )
+    result, stats = run_sim.calibrate_mutations(
+        ancestry,
+        target=target,
+        starts=starts,
+        ends=ends,
+        callable_bp=callable_bp,
+        mask=mask,
+        unit_contract=contract,
+    )
+
+    assert calls == 7  # one initial draw plus six retry draws
+    assert result.num_sites == 0
+    assert target.tolist() == [2]
+    assert stats == {
+        "initial_retained": 0,
+        "retry_attempts": 6,
+        "retry_added": 0,
+        "requested_target_sites": 2,
+        "target_sites": 0,
+        "skipped_target_sites": 2,
+        "skipped_retained_sites": 1,
+        "skipped_windows": [
+            {
+                "window": 0,
+                "start": 0,
+                "end": 10_000,
+                "callable_bp": 49,
+                "requested_sites": 2,
+                "retained_sites_before_skip": 1,
+                "remaining_deficit": 1,
+                "after_retry_attempt": 6,
+            }
+        ],
+    }
+    record = json.loads(result.provenance(result.num_provenances - 1).record)
+    assert record["parameters"]["outcome"] == {**stats, "realized_sites": 0}
+
+    output = tmp_path / "chr1.tsz"
+    tszip.compress(result, str(output))
+    signature = run_sim.contract_signature(contract)
+    metadata = {
+        "status": "complete",
+        "signature": signature,
+        "contract": contract,
+        "size_bytes": output.stat().st_size,
+        "realized_sites": result.num_sites,
+        **stats,
+    }
+    sidecar = output.with_suffix(".tsz.json")
+    sidecar.write_text(json.dumps(metadata), encoding="utf-8")
+    assert run_sim.existing_complete(
+        output,
+        sidecar,
+        signature,
+        verify=True,
+        target=target,
+        callable_bp=callable_bp,
+        starts=starts,
+        ends=ends,
+        mask=mask,
+        expected_haploids=4,
+    )
+    validate_completed_unit(
+        output,
+        population="AFR",
+        simulation=0,
+        chromosome="chr1",
+    )
+
+
+@pytest.mark.parametrize(("callable", "max_retries"), [(49, 5), (50, 6)])
+def test_low_callable_skip_requires_more_than_five_retries_and_fewer_than_fifty_bp(
+    callable: int,
+    max_retries: int,
+) -> None:
+    ancestry = toy_ancestry(length=10_000, samples=2)
+    starts = np.array([0], dtype=np.int64)
+    ends = np.array([10_000], dtype=np.int64)
+    mask = np.array([[0, 10_000 - callable]], dtype=np.int64)
+    callable_bp = callable_from_mask(starts, ends, mask)
+    target = np.array([1], dtype=np.int64)
+    with pytest.raises(run_sim.TargetDeficit):
+        run_sim.calibrate_mutations(
+            ancestry,
+            target=target,
+            starts=starts,
+            ends=ends,
+            callable_bp=callable_bp,
+            mask=mask,
+            unit_contract=toy_contract(
+                target,
+                initial_rate=1e-30,
+                retry_rate=1e-30,
+                max_retries=max_retries,
+                samples=2,
+                length_bp=10_000,
+                callable_bp=callable,
+            ),
         )
 
 
@@ -412,6 +563,8 @@ def toy_sim_config(tmp_path: Path, target: np.ndarray) -> dict[str, object]:
         "initial_rate": 1e-5,
         "retry_rate": 1e-4,
         "max_retries": 3,
+        "skip_low_callable_bp": 50,
+        "skip_low_callable_after_retries": 5,
         "verify_existing": True,
         "fresh": False,
     }
@@ -441,6 +594,8 @@ def root_guard_config(sim_dir: Path, populations: tuple[str, ...]) -> dict[str, 
         "initial_rate": 5e-8,
         "retry_rate": 1e-7,
         "max_retries": 8,
+        "skip_low_callable_bp": 50,
+        "skip_low_callable_after_retries": 5,
     }
 
 
@@ -534,6 +689,9 @@ def test_simulate_unit_publishes_only_exact_output(tmp_path: Path) -> None:
     assert output.is_file() and sidecar.is_file()
     metadata = json.loads(sidecar.read_text(encoding="utf-8"))
     assert metadata["target_sites"] == metadata["realized_sites"] == 6
+    assert metadata["requested_target_sites"] == 6
+    assert metadata["skipped_target_sites"] == 0
+    assert metadata["skipped_windows"] == []
     ts = tszip.decompress(str(output))
     provenance = assert_compact_unit_provenance(ts, metadata)
     seeds = provenance["unit_contract"]["seeds"]
@@ -569,7 +727,12 @@ def test_zero_theta_output_has_the_same_compact_provenance_contract(tmp_path: Pa
         "initial_retained": 0,
         "retry_added": 0,
         "retry_attempts": 0,
+        "requested_target_sites": 0,
+        "target_sites": 0,
         "realized_sites": 0,
+        "skipped_target_sites": 0,
+        "skipped_retained_sites": 0,
+        "skipped_windows": [],
     }
 
 
