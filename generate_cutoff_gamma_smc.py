@@ -500,7 +500,33 @@ def write_population_cutoffs(
             output.unlink(missing_ok=True)
         with h5py.File(output, "a") as handle:
             first_contract = decode_contracts[chromosomes[0]]
-            if not handle.attrs:
+            initialize_root = not handle.attrs
+            if handle.attrs and not _root_compatible(
+                handle,
+                population=population,
+                simulation_contract_key=simulation_contract_key,
+                decode_contract=first_contract,
+                p_values=p_values,
+                n_sims=n_sims,
+            ):
+                completed_groups = [
+                    name
+                    for name in handle
+                    if isinstance(handle[name], h5py.Group)
+                    and bool(handle[name].attrs.get("complete", False))
+                ]
+                if bool(handle.attrs.get("complete", False)) or completed_groups:
+                    raise ValueError(f"incompatible cutoff output; use --fresh: {output}")
+                print(
+                    f"[gamma-cutoffs] reinitializing empty incompatible output: {output}",
+                    flush=True,
+                )
+                for name in list(handle):
+                    del handle[name]
+                for name in list(handle.attrs):
+                    del handle.attrs[name]
+                initialize_root = True
+            if initialize_root:
                 _write_root(
                     handle,
                     population=population,
@@ -518,15 +544,6 @@ def write_population_cutoffs(
                         "gamma_smc_executable_path": str(executable),
                     }
                 )
-            elif not _root_compatible(
-                handle,
-                population=population,
-                simulation_contract_key=simulation_contract_key,
-                decode_contract=first_contract,
-                p_values=p_values,
-                n_sims=n_sims,
-            ):
-                raise ValueError(f"incompatible cutoff output; use --fresh: {output}")
             for name in list(handle):
                 if name.startswith("__tmp_"):
                     del handle[name]

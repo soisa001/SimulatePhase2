@@ -6,6 +6,7 @@ from pathlib import Path
 
 import h5py
 import msprime
+import pytest
 import tszip
 
 import generate_cutoff_gamma_smc
@@ -134,12 +135,22 @@ def test_gamma_smc_cutoffs_decode_tsz_and_restart_from_compact_hdf5(
         "--progress-every",
         "20",
     ]
+    output = output_dir / "afr.gamma_smc_cutoffs.10kb.h5"
+    output.parent.mkdir(parents=True)
+    with h5py.File(output, "w") as handle:
+        handle.attrs.update(
+            {
+                "schema": generate_cutoff_gamma_smc.GAMMA_CUTOFF_SCHEMA,
+                "complete": False,
+                "decoder_contract_key": "failed-run-contract",
+            }
+        )
+        handle.create_dataset("p_value", data=[0.1])
     assert generate_cutoff_gamma_smc.main(args) == 0
     assert len(list(counter.glob("*.done"))) == 20
     assert generate_cutoff_gamma_smc.main(args) == 0
     assert len(list(counter.glob("*.done"))) == 20
 
-    output = output_dir / "afr.gamma_smc_cutoffs.10kb.h5"
     with h5py.File(output, "r") as handle:
         assert handle.attrs["schema"] == generate_cutoff_gamma_smc.GAMMA_CUTOFF_SCHEMA
         assert handle.attrs["source_kind"] == "gamma_smc_posterior"
@@ -154,3 +165,7 @@ def test_gamma_smc_cutoffs_decode_tsz_and_restart_from_compact_hdf5(
         assert group["cutoff"].shape == (1, 3)
         assert group["position_0based"][:].tolist() == [0, 10_000, 20_000]
     assert not list((sim_dir / "afr" / ".gamma_smc_profiles").rglob("*.npz"))
+
+    binary.write_bytes(b"changed gamma binary")
+    with pytest.raises(SystemExit, match="incompatible cutoff output"):
+        generate_cutoff_gamma_smc.main(args)
