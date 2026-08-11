@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import h5py
@@ -8,6 +11,34 @@ import numpy as np
 import pytest
 
 import plot_gamma_smc_sanity
+
+
+@pytest.mark.parametrize(
+    "module_name",
+    ["plot_gamma_smc_sanity", "plot_gamma_smc_sanity_genomewide"],
+)
+def test_batch_plotters_override_an_inherited_notebook_backend(
+    tmp_path: Path, module_name: str
+) -> None:
+    environment = os.environ.copy()
+    environment["MPLBACKEND"] = "module://matplotlib_inline.backend_inline"
+    environment["MPLCONFIGDIR"] = str(tmp_path / "matplotlib")
+    command = (
+        f"import os; import {module_name}; import matplotlib; "
+        "print(os.environ['MPLBACKEND'], matplotlib.get_backend(), sep='|')"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", command],
+        cwd=Path(__file__).resolve().parents[1],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    environment_backend, active_backend = result.stdout.strip().split("|")
+    assert environment_backend.lower() == "agg"
+    assert active_backend.lower() == "agg"
 
 
 def write_fixture(root: Path, *, mismatch_cutoff: bool = False) -> None:

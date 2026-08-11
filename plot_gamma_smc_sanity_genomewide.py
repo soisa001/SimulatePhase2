@@ -14,7 +14,9 @@ from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-os.environ.setdefault("MPLBACKEND", "Agg")
+# Notebook kernels commonly export ``module://matplotlib_inline.backend_inline``.
+# Batch plotting must not inherit a backend that may be absent from the uv environment.
+os.environ["MPLBACKEND"] = "Agg"
 
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402

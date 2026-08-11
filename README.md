@@ -470,7 +470,9 @@ checksums, and letter-sized figures in both PNG and PDF formats under
 across-simulation summary plus cutoff (`across_simulation_summary.*`) are
 separate figures; the heatmap and distribution diagnostics are also retained.
 Successful reruns remove stale copies of the former `profiles_and_cutoff.*`
-combined figure.
+combined figure. Both plotting commands force Matplotlib's non-interactive
+`Agg` backend so inherited notebook backend settings cannot break HPC batch
+execution.
 
 Once all requested chromosomes are complete, validate and concatenate them into
 genome-wide diagnostics without repeating simulation or Gamma-SMC decoding:
