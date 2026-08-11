@@ -326,7 +326,7 @@ def _plot_style() -> None:
 def _save_figure(figure: plt.Figure, output_dir: Path, stem: str, dpi: int) -> list[Path]:
     paths = [output_dir / f"{stem}.png", output_dir / f"{stem}.pdf"]
     figure.savefig(paths[0], dpi=dpi)
-    figure.savefig(paths[1])
+    figure.savefig(paths[1], dpi=dpi)
     plt.close(figure)
     return paths
 

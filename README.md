@@ -472,6 +472,23 @@ separate figures; the heatmap and distribution diagnostics are also retained.
 Successful reruns remove stale copies of the former `profiles_and_cutoff.*`
 combined figure.
 
+Once all requested chromosomes are complete, validate and concatenate them into
+genome-wide diagnostics without repeating simulation or Gamma-SMC decoding:
+
+```bash
+uv run --frozen python -u plot_gamma_smc_sanity_genomewide.py \
+  --sanity-dir /scratch.global/soisa001/sims_v2/sanity/gamma_smc_10sims_100000pairs \
+  --population AFR --chroms 1-22 --n-sims 10
+```
+
+The genome-wide analysis validates all 220 AFR restart profiles and all 22
+completed cutoff groups before writing separate null-profile and
+across-simulation-summary plots, a heatmap, distributions, per-simulation and
+per-chromosome tables, a coordinate-level gzip table, an analysis manifest, and
+checksums under `diagnostics/afr_genomewide`. Every figure is written in both
+PNG and PDF format. Genome-wide PDF traces are rasterized internally to keep
+file sizes practical while preserving vector text and axes.
+
 ## Run all phases
 
 `run_full_simulation.py` writes a separate timestamped provenance log per phase
