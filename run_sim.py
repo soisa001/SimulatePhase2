@@ -64,6 +64,7 @@ from phase2_map import (
     watterson_a_n,
     window_geometry,
 )
+from resource_budget import cpu_resource_plan
 from simulation_outputs import quick_tsz_archive
 
 DEFAULT_RECOMBINATION_RATE = 1e-8
@@ -1889,6 +1890,11 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--pops", default=",".join(DEFAULT_POPS))
     result.add_argument("--chroms", default="1-22")
     result.add_argument("--workers", type=int, default=4)
+    result.add_argument(
+        "--allow-cpu-oversubscription",
+        action="store_true",
+        help="permit --workers to exceed CPUs visible to this task (diagnostics only)",
+    )
     result.add_argument("--max-pending", type=int, default=0, help="Default: twice --workers")
     result.add_argument("--max-tasks-per-worker", type=int, default=0)
     result.add_argument("--demography-epochs", type=int, default=DEFAULT_DEMOGRAPHY_EPOCHS)
@@ -1945,6 +1951,15 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("--base-seed must be nonnegative")
     if args.samples_per_population < 0:
         raise SystemExit("--samples-per-population must be nonnegative")
+    try:
+        resource_plan = cpu_resource_plan(
+            workers=args.workers,
+            available_cpus=None,
+            allow_oversubscription=args.allow_cpu_oversubscription,
+            label="simulation",
+        )
+    except ValueError as error:
+        raise SystemExit(str(error)) from error
     map_source = args.map_path.expanduser().resolve()
     if not map_source.is_file():
         raise SystemExit(f"map does not exist: {map_source}; run generate_map.py first")
@@ -2067,6 +2082,7 @@ def main(argv: list[str] | None = None) -> int:
         f"pops={populations} map_samples={config['map_sample_counts']} "
         f"simulation_samples={config['sample_counts']} chroms={chromosomes}\n"
         f"S_scales={{{scale_summary}}}\n"
+        f"resources={json.dumps(resource_plan, sort_keys=True)}\n"
         f"units={total:,} workers={args.workers} max_pending={max_pending} "
         f"mu={args.initial_rate:g} retry_mu={args.retry_rate:g} retries={args.max_retries}\n"
         f"low_callable_skip=callable_bp<{args.skip_low_callable_bp} "

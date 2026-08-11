@@ -253,6 +253,12 @@ Simulation defaults are:
 - output root `/scratch.global/soisa001/sims`, with units under each
   `/scratch.global/soisa001/sims/<pop>/` directory
 
+`run_sim.py` checks the task's Slurm/CPU-affinity budget before creating the
+worker pool. A request such as `--workers 100` therefore requires 100 CPUs
+visible to that process; it no longer silently launches 100 single-threaded
+workers into a one-CPU allocation. `--allow-cpu-oversubscription` is available
+only for an intentional diagnostic.
+
 `--demography-epochs` can explicitly coarsen the grid. A representative local
 ancestry benchmark with 224 diploids and a 10 Mb region took 0.90 seconds at
 10,000 epochs versus 0.75 seconds at 1,000 epochs; at 1 Mb the corresponding
@@ -406,8 +412,9 @@ as the full reducer.
 The workflow preflights all 1,320 selected TSZip units before decoding. It only
 reads published simulation files and places HDF5 cutoffs and restart profiles
 under a separate sanity root, so it can run while `run_sim.py` atomically
-publishes later simulation indices. A representative 100-CPU-node allocation,
-with the main producer using 45 workers, is:
+publishes later simulation indices. Each decoder also launches one
+single-threaded TSZip-to-VCF streaming producer. A representative shared
+100-CPU allocation, with the main simulation producer using 45 workers, is:
 
 ```bash
 uv run --frozen python -u run_gamma_smc_sanity.py \
@@ -416,15 +423,24 @@ uv run --frozen python -u run_gamma_smc_sanity.py \
   --gamma-smc-repo ../gamma_smc_ts \
   --pops AFR,EUR,AMR,SAS,MID,EAS --chroms 1-22 \
   --n-sims 10 --n-random-pairs 100000 --pairs-seed 1729 \
-  --decode-workers 1 --decode-threads 24
+  --decode-workers 10 --decode-threads 4 --reserved-cpus 45
 ```
 
-The single decoder uses up to 24 CPUs while avoiding several concurrent
-TSZip-to-VCF streams on the same filesystem as the active simulation producer.
-Adjust the two concurrency arguments together with the producer worker count so
-their product plus the producer count does not exceed the allocated CPUs. Do
-not add `--exclude-within` unless the empirical 100,000-pair scan used the same
-exclusion.
+That layout has an upper bound of 45 simulation CPUs + 40 native decoder CPUs +
+10 streaming producers = 95 CPUs. On a dedicated 100-CPU decode allocation,
+`--decode-workers 10 --decode-threads 8` uses up to 90 pipeline slots. For the
+full 1,000-replicate reduction, independent files generally favor more decoder
+workers with fewer OpenMP threads; a starting point on a dedicated 100-CPU node
+is `--decode-workers 20 --decode-threads 4`. Benchmark the actual shared
+filesystem before increasing concurrent streams. The runner fails closed when
+native decoder demand exceeds the visible unreserved CPUs and logs both native
+demand and the producer-inclusive upper bound. Do not add `--exclude-within`
+unless the empirical 100,000-pair scan used the same exclusion.
+
+`--decode-workers` is execution-only and may be changed on resume.
+`--decode-threads` is part of the numerical decoder contract, so keep it fixed
+when reusing an existing sanity root; use a new output root for a different
+thread count rather than mixing profiles.
 
 With 10 null simulations, the minimum plus-one p-value is `1/11 = 0.090909...`.
 Thus, for p <= 0.1, the position-specific cutoff is the largest of the 10 null
@@ -437,6 +453,20 @@ Gamma-SMC values, and the tie-safe significance rule is strictly
 - `cutoffs/*.gamma_smc_cutoffs.10kb.h5`: restartable source artifacts;
 - `manifest.json` and `checksums.sha256`: selected unit digests, all resolved
   decoder parameters, commands, paths, and output checksums.
+
+As soon as one population/chromosome group is complete, validate and plot its
+10 restart profiles without waiting for the remaining groups:
+
+```bash
+uv run --frozen python -u plot_gamma_smc_sanity.py \
+  --sanity-dir /scratch.global/soisa001/sims_v2/sanity/gamma_smc_10sims_100000pairs \
+  --population AFR --chromosome 1 --n-sims 10
+```
+
+The analysis verifies the HDF5 cutoff against the pointwise maximum of the ten
+profiles, then writes per-simulation and per-position tables, an analysis JSON,
+checksums, and letter-sized profile, heatmap, and distribution figures in both
+PNG and PDF formats under `diagnostics/afr_chr1`.
 
 ## Run all phases
 

@@ -175,6 +175,9 @@ def test_gamma_smc_cutoffs_decode_tsz_and_restart_from_compact_hdf5(
         group = handle["chr1"]
         assert bool(group.attrs["complete"])
         assert group.attrs["n_pairs"] == 4
+        assert group.attrs["decoded_profiles"] == 20
+        assert group.attrs["reused_profiles"] == 0
+        assert group.attrs["decode_group_wall_seconds"] >= 0
         assert group["cutoff"].shape == (1, 3)
         assert group["position_0based"][:].tolist() == [0, 10_000, 20_000]
     assert not list((sim_dir / "afr" / ".gamma_smc_profiles").rglob("*.npz"))

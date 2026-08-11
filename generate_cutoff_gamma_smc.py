@@ -46,6 +46,7 @@ from phase2_map import (
     load_mask,
     parse_chroms,
 )
+from resource_budget import cpu_resource_plan
 from run_sim import DEFAULT_SIM_DIR, atomic_text, output_lock, sha256_file
 from simulation_outputs import completed_units, validate_completed_unit
 
@@ -679,6 +680,8 @@ def write_population_cutoffs(
 
             null = np.empty((n_sims, len(expected_positions)), dtype=np.float32)
             pair_counts = np.empty(n_sims, dtype=np.int64)
+            decode_seconds = np.full(n_sims, np.nan, dtype=np.float64)
+            profile_reused = np.zeros(n_sims, dtype=np.bool_)
             started = time.monotonic()
             with ThreadPoolExecutor(max_workers=decode_workers) as executor:
                 futures = {}
@@ -709,9 +712,11 @@ def write_population_cutoffs(
                 done = reused = 0
                 for future in as_completed(futures):
                     simulation = futures[future]
-                    values, n_pairs, was_reused, _seconds = future.result()
+                    values, n_pairs, was_reused, seconds = future.result()
                     null[simulation] = values
                     pair_counts[simulation] = n_pairs
+                    decode_seconds[simulation] = seconds
+                    profile_reused[simulation] = was_reused
                     done += 1
                     reused += int(was_reused)
                     if done <= 4 or done % progress_every == 0 or done == n_sims:
@@ -721,6 +726,34 @@ def write_population_cutoffs(
                             f"elapsed={(time.monotonic() - started) / 60:.1f} min",
                             flush=True,
                         )
+            group_wall_seconds = time.monotonic() - started
+            new_decode_seconds = decode_seconds[~profile_reused]
+            timing = {
+                "decode_group_wall_seconds": float(group_wall_seconds),
+                "decoded_profiles": int(np.count_nonzero(~profile_reused)),
+                "reused_profiles": int(np.count_nonzero(profile_reused)),
+                "new_profiles_per_hour": (
+                    float(np.count_nonzero(~profile_reused) * 3600.0 / group_wall_seconds)
+                    if group_wall_seconds > 0
+                    else 0.0
+                ),
+                "decode_seconds_sum": float(new_decode_seconds.sum()),
+                "decode_seconds_median": (
+                    float(np.median(new_decode_seconds)) if len(new_decode_seconds) else 0.0
+                ),
+                "decode_seconds_max": (
+                    float(new_decode_seconds.max()) if len(new_decode_seconds) else 0.0
+                ),
+            }
+            print(
+                f"[gamma-cutoffs-timing] {population} {chromosome}: "
+                f"wall={group_wall_seconds / 60:.2f} min "
+                f"decoded={timing['decoded_profiles']} reused={timing['reused_profiles']} "
+                f"rate={timing['new_profiles_per_hour']:.2f} profiles/hour "
+                f"median_decode={timing['decode_seconds_median'] / 60:.2f} min "
+                f"max_decode={timing['decode_seconds_max'] / 60:.2f} min",
+                flush=True,
+            )
             if not np.all(pair_counts == n_pairs_expected):
                 raise ValueError(
                     f"Gamma-SMC n_pairs does not equal the decoder contract ({n_pairs_expected:,})"
@@ -745,6 +778,7 @@ def write_population_cutoffs(
                         "decoder_contract_json": json.dumps(contract, sort_keys=True),
                         "callable_mask": str(callable_masks[chromosome]),
                         "callable_mask_sha256": sha256_file(callable_masks[chromosome]),
+                        **timing,
                     }
                 )
                 options = {
@@ -819,6 +853,17 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--exclude-within", action="store_true")
     result.add_argument("--decode-workers", type=int, default=4)
     result.add_argument("--decode-threads", type=int, default=1)
+    result.add_argument(
+        "--reserved-cpus",
+        type=int,
+        default=0,
+        help="CPUs reserved for a concurrent producer or other work in this allocation",
+    )
+    result.add_argument(
+        "--allow-cpu-oversubscription",
+        action="store_true",
+        help="permit native decoder threads to exceed the unreserved CPU budget",
+    )
     result.add_argument("--progress-every", type=int, default=25)
     result.add_argument("--keep-profiles", action="store_true")
     result.add_argument(
@@ -854,6 +899,19 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("random-pair count and seed must be nonnegative")
     if args.exclude_within and args.n_random_pairs == 0:
         raise SystemExit("--exclude-within requires --n-random-pairs")
+    if args.reserved_cpus < 0:
+        raise SystemExit("--reserved-cpus must be nonnegative")
+    try:
+        resource_plan = cpu_resource_plan(
+            workers=args.decode_workers,
+            threads_per_worker=args.decode_threads,
+            producer_slots_per_worker=1,
+            reserved_cpus=args.reserved_cpus,
+            allow_oversubscription=args.allow_cpu_oversubscription,
+            label="Gamma-SMC decode",
+        )
+    except ValueError as error:
+        raise SystemExit(str(error)) from error
     try:
         chromosomes = parse_chroms(args.chroms)
         p_values = parse_p_values(args.p_values)
@@ -934,6 +992,7 @@ def main(argv: list[str] | None = None) -> int:
             for chromosome in chromosomes
         }
         print(
+            f"[gamma-cutoffs] resources={json.dumps(resource_plan, sort_keys=True)}\n"
             "[gamma-cutoffs] empirical decode contract "
             f"theta={args.theta:g} rho/theta={args.rho_over_theta:g} "
             f"mu={args.mutation_rate:g} threshold={args.threshold_years:g} years "

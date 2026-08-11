@@ -102,4 +102,5 @@ def test_sanity_reducer_uses_separate_cutoff_and_profile_roots(tmp_path: Path) -
     assert command[command.index("--profile-dir") + 1] == str(output_root / "profiles")
     assert command[command.index("--n-random-pairs") + 1] == "100000"
     assert command[command.index("--pairs-seed") + 1] == "1729"
+    assert command[command.index("--reserved-cpus") + 1] == "0"
     assert "--keep-profiles" in command

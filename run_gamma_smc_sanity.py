@@ -39,6 +39,7 @@ from generate_cutoff_gamma_smc import (
 )
 from generate_cutoffs import ALL_AUTOSOMES, DEFAULT_GENERATION_TIME, DEFAULT_THRESHOLD_YEARS
 from phase2_map import DEFAULT_GAMMA_SMC_REPO, DEFAULT_POPS, parse_chroms
+from resource_budget import cpu_resource_plan
 from run_sim import DEFAULT_SIM_DIR, atomic_text, sha256_file
 from simulation_outputs import completed_units, validate_completed_unit
 
@@ -199,6 +200,8 @@ def reducer_command(
         str(args.decode_workers),
         "--decode-threads",
         str(args.decode_threads),
+        "--reserved-cpus",
+        str(args.reserved_cpus),
         "--progress-every",
         str(args.progress_every),
     ]
@@ -214,6 +217,8 @@ def reducer_command(
         command.append("--exclude-within")
     if args.fresh:
         command.append("--fresh")
+    if args.allow_cpu_oversubscription:
+        command.append("--allow-cpu-oversubscription")
     return command
 
 
@@ -493,6 +498,17 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--pair-block", type=int, default=DEFAULT_PAIR_BLOCK)
     result.add_argument("--decode-workers", type=int, default=4)
     result.add_argument("--decode-threads", type=int, default=4)
+    result.add_argument(
+        "--reserved-cpus",
+        type=int,
+        default=0,
+        help="CPUs used by a concurrent simulation producer in this allocation",
+    )
+    result.add_argument(
+        "--allow-cpu-oversubscription",
+        action="store_true",
+        help="permit native decoder threads to exceed the unreserved CPU budget",
+    )
     result.add_argument("--progress-every", type=int, default=1)
     result.add_argument("--fresh", action="store_true")
     return result
@@ -518,6 +534,19 @@ def main(argv: list[str] | None = None) -> int:
     invalid = [name for name, value in positive.items() if value <= 0]
     if invalid or args.pairs_seed < 0:
         raise SystemExit(f"invalid arguments: {invalid or ['pairs_seed']}")
+    if args.reserved_cpus < 0:
+        raise SystemExit("--reserved-cpus must be nonnegative")
+    try:
+        resource_plan = cpu_resource_plan(
+            workers=args.decode_workers,
+            threads_per_worker=args.decode_threads,
+            producer_slots_per_worker=1,
+            reserved_cpus=args.reserved_cpus,
+            allow_oversubscription=args.allow_cpu_oversubscription,
+            label="Gamma-SMC sanity decode",
+        )
+    except ValueError as error:
+        raise SystemExit(str(error)) from error
     try:
         populations = _parse_populations(args.pops)
         chromosomes = parse_chroms(args.chroms)
@@ -547,6 +576,7 @@ def main(argv: list[str] | None = None) -> int:
             raise FileNotFoundError(
                 f"Gamma-SMC launcher/binary missing: {gamma_aou}, {gamma_executable}"
             )
+        print(f"[sanity-resources] {json.dumps(resource_plan, sort_keys=True)}", flush=True)
         preflight = preflight_completed_units(
             sim_dir=sim_dir,
             populations=populations,
@@ -606,6 +636,7 @@ def main(argv: list[str] | None = None) -> int:
         },
         "populations": populations,
         "chromosomes": chromosomes,
+        "resources": resource_plan,
         "preflight": preflight,
         "decoder": {
             "n_random_pairs": args.n_random_pairs,
