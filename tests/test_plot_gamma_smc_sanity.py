@@ -55,6 +55,9 @@ def test_chromosome_analysis_writes_validated_tables_and_both_figure_formats(
     sanity = tmp_path / "sanity"
     output = tmp_path / "analysis"
     write_fixture(sanity)
+    output.mkdir()
+    for name in ("profiles_and_cutoff.png", "profiles_and_cutoff.pdf"):
+        (output / name).write_bytes(b"stale legacy plot")
     assert (
         plot_gamma_smc_sanity.main(
             [
@@ -75,8 +78,10 @@ def test_chromosome_analysis_writes_validated_tables_and_both_figure_formats(
         == 0
     )
     for name in (
-        "profiles_and_cutoff.png",
-        "profiles_and_cutoff.pdf",
+        "null_profiles.png",
+        "null_profiles.pdf",
+        "across_simulation_summary.png",
+        "across_simulation_summary.pdf",
         "profile_heatmap.png",
         "profile_heatmap.pdf",
         "profile_distributions.png",
@@ -87,7 +92,10 @@ def test_chromosome_analysis_writes_validated_tables_and_both_figure_formats(
         "checksums.sha256",
     ):
         assert (output / name).is_file()
+    for name in ("profiles_and_cutoff.png", "profiles_and_cutoff.pdf"):
+        assert not (output / name).exists()
     manifest = json.loads((output / "analysis.json").read_text(encoding="utf-8"))
+    assert manifest["schema"] == "simulatephase2.gamma-smc-sanity-chromosome-analysis/v2"
     assert manifest["validation"]["p_le_0.1_cutoff_equals_pointwise_profile_maximum"]
     assert manifest["n_pairs_per_simulation"] == 100_000
 

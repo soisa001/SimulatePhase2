@@ -465,8 +465,12 @@ uv run --frozen python -u plot_gamma_smc_sanity.py \
 
 The analysis verifies the HDF5 cutoff against the pointwise maximum of the ten
 profiles, then writes per-simulation and per-position tables, an analysis JSON,
-checksums, and letter-sized profile, heatmap, and distribution figures in both
-PNG and PDF formats under `diagnostics/afr_chr1`.
+checksums, and letter-sized figures in both PNG and PDF formats under
+`diagnostics/afr_chr1`. The ten null traces (`null_profiles.*`) and the
+across-simulation summary plus cutoff (`across_simulation_summary.*`) are
+separate figures; the heatmap and distribution diagnostics are also retained.
+Successful reruns remove stale copies of the former `profiles_and_cutoff.*`
+combined figure.
 
 ## Run all phases
 

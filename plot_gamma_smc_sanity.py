@@ -24,7 +24,7 @@ from phase2_map import canonical_chrom  # noqa: E402
 from run_sim import atomic_text, sha256_file  # noqa: E402
 
 STATISTIC = "mean_p_tmrca_lt_threshold"
-ANALYSIS_SCHEMA = "simulatephase2.gamma-smc-sanity-chromosome-analysis/v1"
+ANALYSIS_SCHEMA = "simulatephase2.gamma-smc-sanity-chromosome-analysis/v2"
 FIGURE_SIZE = (11.0, 8.5)
 
 
@@ -331,7 +331,53 @@ def _save_figure(figure: plt.Figure, output_dir: Path, stem: str, dpi: int) -> l
     return paths
 
 
-def plot_profiles(
+def _remove_legacy_combined_figure(output_dir: Path) -> None:
+    """Remove obsolete generated plots after their replacements are complete."""
+    for suffix in ("png", "pdf"):
+        path = output_dir / f"profiles_and_cutoff.{suffix}"
+        if path.is_file():
+            path.unlink()
+
+
+def _calibration_title(*, population: str, chromosome: str, profiles: ProfileBundle) -> str:
+    return (
+        f"{population} {chromosome} Gamma-SMC sanity calibration — "
+        f"{len(profiles.values)} simulations × {profiles.n_pairs:,} pairs"
+    )
+
+
+def plot_null_profiles(
+    output_dir: Path,
+    *,
+    population: str,
+    chromosome: str,
+    profiles: ProfileBundle,
+    dpi: int,
+) -> list[Path]:
+    x = profiles.positions / 1_000_000.0
+    figure, axis = plt.subplots(figsize=FIGURE_SIZE, constrained_layout=True)
+    colors = plt.get_cmap("tab10")(np.linspace(0.0, 1.0, len(profiles.values)))
+    for simulation, (values, color) in enumerate(zip(profiles.values, colors, strict=True)):
+        axis.plot(
+            x,
+            values,
+            color=color,
+            linewidth=0.65,
+            alpha=0.8,
+            label=f"sim {simulation}",
+        )
+    axis.set_xlabel(f"{chromosome} position (Mb)")
+    axis.set_ylabel("Mean posterior P(TMRCA < 4,500 y)")
+    axis.set_title(
+        f"{_calibration_title(population=population, chromosome=chromosome, profiles=profiles)}\n"
+        "Ten independently simulated null profiles"
+    )
+    axis.legend(ncol=5, frameon=False, loc="upper right")
+    axis.grid(alpha=0.2, linewidth=0.5)
+    return _save_figure(figure, output_dir, "null_profiles", dpi)
+
+
+def plot_across_simulation_summary(
     output_dir: Path,
     *,
     population: str,
@@ -343,29 +389,55 @@ def plot_profiles(
     x = profiles.positions / 1_000_000.0
     mean = profiles.values.mean(axis=0)
     q05, median, q95 = np.quantile(profiles.values, [0.05, 0.5, 0.95], axis=0)
-    figure, axes = plt.subplots(2, 1, figsize=FIGURE_SIZE, sharex=True, constrained_layout=True)
-    colors = plt.get_cmap("tab10")(np.linspace(0.0, 1.0, len(profiles.values)))
-    for simulation, (values, color) in enumerate(zip(profiles.values, colors, strict=True)):
-        axes[0].plot(x, values, color=color, linewidth=0.65, alpha=0.8, label=f"sim {simulation}")
-    axes[0].set_ylabel("Mean posterior P(TMRCA < 4,500 y)")
-    axes[0].set_title("Ten independently simulated null profiles")
-    axes[0].legend(ncol=5, frameon=False, loc="upper right")
-    axes[0].grid(alpha=0.2, linewidth=0.5)
-
-    axes[1].fill_between(x, q05, q95, alpha=0.25, label="5th–95th percentile")
-    axes[1].plot(x, mean, linewidth=1.0, label="mean")
-    axes[1].plot(x, median, linewidth=1.0, label="median")
-    axes[1].plot(x, cutoff.cutoff, color="black", linewidth=0.9, label="p≤0.1 cutoff (maximum)")
-    axes[1].set_xlabel(f"{chromosome} position (Mb)")
-    axes[1].set_ylabel("Posterior probability")
-    axes[1].set_title("Across-simulation summary and exact pointwise cutoff")
-    axes[1].legend(ncol=2, frameon=False, loc="upper right")
-    axes[1].grid(alpha=0.2, linewidth=0.5)
-    figure.suptitle(
-        f"{population} {chromosome} Gamma-SMC sanity calibration — "
-        f"{len(profiles.values)} simulations × {profiles.n_pairs:,} pairs"
+    figure, axis = plt.subplots(figsize=FIGURE_SIZE, constrained_layout=True)
+    axis.fill_between(x, q05, q95, alpha=0.25, label="5th–95th percentile")
+    axis.plot(x, mean, linewidth=1.0, label="mean")
+    axis.plot(x, median, linewidth=1.0, label="median")
+    axis.plot(
+        x,
+        cutoff.cutoff,
+        color="black",
+        linewidth=0.9,
+        label="p≤0.1 cutoff (maximum)",
     )
-    return _save_figure(figure, output_dir, "profiles_and_cutoff", dpi)
+    axis.set_xlabel(f"{chromosome} position (Mb)")
+    axis.set_ylabel("Posterior probability")
+    axis.set_title(
+        f"{_calibration_title(population=population, chromosome=chromosome, profiles=profiles)}\n"
+        "Across-simulation summary and exact pointwise cutoff"
+    )
+    axis.legend(ncol=2, frameon=False, loc="upper right")
+    axis.grid(alpha=0.2, linewidth=0.5)
+    return _save_figure(figure, output_dir, "across_simulation_summary", dpi)
+
+
+def plot_profiles(
+    output_dir: Path,
+    *,
+    population: str,
+    chromosome: str,
+    profiles: ProfileBundle,
+    cutoff: CutoffBundle,
+    dpi: int,
+) -> list[Path]:
+    """Write null traces and across-simulation summaries as separate figures."""
+    return [
+        *plot_null_profiles(
+            output_dir,
+            population=population,
+            chromosome=chromosome,
+            profiles=profiles,
+            dpi=dpi,
+        ),
+        *plot_across_simulation_summary(
+            output_dir,
+            population=population,
+            chromosome=chromosome,
+            profiles=profiles,
+            cutoff=cutoff,
+            dpi=dpi,
+        ),
+    ]
 
 
 def plot_heatmap(
@@ -395,9 +467,7 @@ def plot_heatmap(
     axis.set_xlabel(f"{chromosome} position (Mb)")
     axis.set_ylabel("Simulation index")
     axis.set_yticks(np.arange(len(profiles.values)))
-    axis.set_title(
-        f"{population} {chromosome}: spatial consistency across null Gamma-SMC profiles"
-    )
+    axis.set_title(f"{population} {chromosome}: spatial consistency across null Gamma-SMC profiles")
     colorbar = figure.colorbar(image, ax=axis, pad=0.02)
     colorbar.set_label("Mean posterior P(TMRCA < 4,500 y)")
     return _save_figure(figure, output_dir, "profile_heatmap", dpi)
@@ -519,6 +589,7 @@ def main(argv: list[str] | None = None) -> int:
                 dpi=args.dpi,
             ),
         ]
+        _remove_legacy_combined_figure(output_dir)
     except (FileNotFoundError, KeyError, OSError, TypeError, ValueError) as error:
         raise SystemExit(f"Gamma-SMC chromosome analysis failed: {error}") from error
 
