@@ -54,6 +54,18 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def _git_revision(repository: Path) -> str:
+    try:
+        return subprocess.run(
+            ["git", "-C", str(repository), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+
+
 def _parse_populations(spec: str) -> list[str]:
     populations = [part.strip().upper() for part in spec.split(",") if part.strip()]
     unknown = [population for population in populations if population not in DEFAULT_POPS]
@@ -578,6 +590,20 @@ def main(argv: list[str] | None = None) -> int:
         "python": platform.python_version(),
         "simulation_root": str(sim_dir),
         "output_root": str(output_root),
+        "software": {
+            "simulatephase2_repository": str(Path(__file__).resolve().parent),
+            "simulatephase2_git_revision": _git_revision(Path(__file__).resolve().parent),
+            "sanity_script_sha256": sha256_file(Path(__file__).resolve()),
+            "gamma_cutoff_reducer_sha256": sha256_file(
+                Path(__file__).resolve().with_name("generate_cutoff_gamma_smc.py")
+            ),
+            "gamma_smc_repository": str(gamma_repository),
+            "gamma_smc_git_revision": _git_revision(gamma_repository),
+            "gamma_smc_aou_sha256": sha256_file(gamma_aou),
+            "gamma_smc_executable_sha256": sha256_file(gamma_executable),
+            "numpy": np.__version__,
+            "h5py": h5py.__version__,
+        },
         "populations": populations,
         "chromosomes": chromosomes,
         "preflight": preflight,
