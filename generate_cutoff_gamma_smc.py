@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Decode completed TSZip nulls with Gamma-SMC and write compact 10 kb cutoffs.
 
-The decoder contract matches the empirical within-individual scan: fixed
-theta/rho/mutation time scale, one homolog pair per diploid, stride-only
-output, and the mean posterior ``P(TMRCA < threshold)`` statistic. Decoder TSVs
-are reduced immediately to restartable compressed profiles and are not kept.
+The default decoder contract matches the empirical within-individual scan:
+fixed theta/rho/mutation time scale, one homolog pair per diploid, stride-only
+output, and the mean posterior ``P(TMRCA < threshold)`` statistic. A seeded
+random-pair mode supports the corresponding large-panel scan contract. Decoder
+TSVs are reduced immediately to restartable compressed profiles and are not
+kept.
 """
 
 from __future__ import annotations
@@ -53,6 +55,7 @@ DEFAULT_RHO_OVER_THETA = 0.8
 DEFAULT_MUTATION_RATE = 1.29e-8
 DEFAULT_CACHE_SIZE = 1_000
 DEFAULT_PAIR_BLOCK = 256
+DEFAULT_PAIRS_SEED = 1729
 STATISTIC_COLUMN = "mean_p_tmrca_lt_threshold"
 POSITION_COLUMN = "position_0based"
 
@@ -107,8 +110,11 @@ def decoder_contract(
     cache_size: int,
     threads: int,
     pair_block: int,
+    n_random_pairs: int = 0,
+    pairs_seed: int = DEFAULT_PAIRS_SEED,
+    exclude_within: bool = False,
 ) -> dict[str, object]:
-    return {
+    contract: dict[str, object] = {
         "schema": "simulatephase2.gamma-smc-decode/v1",
         "aou_launcher_sha256": sha256_file(aou),
         "gamma_smc_interface_sha256": _interface_sha256(aou),
@@ -131,6 +137,17 @@ def decoder_contract(
         "backward_alignment": "fixed",
         "callable_mask_sha256": mask_sha256,
     }
+    if n_random_pairs > 0:
+        contract.update(
+            {
+                "pair_selection": "random_haplotype_pairs",
+                "n_random_pairs": n_random_pairs,
+                "pairs_seed": pairs_seed,
+                "exclude_within": exclude_within,
+                "random_pair_sampling": "distinct_unordered_uniform",
+            }
+        )
+    return contract
 
 
 def _full_callable_mask(length: int, excluded: np.ndarray) -> list[tuple[int, int]]:
@@ -160,9 +177,7 @@ def prepare_callable_masks(
                 "--hardmask is required: simulations used an exclusion mask, and Gamma-SMC "
                 "must use its callable complement"
             )
-        excluded = {
-            chromosome: np.empty((0, 2), dtype=np.int64) for chromosome in chromosomes
-        }
+        excluded = {chromosome: np.empty((0, 2), dtype=np.int64) for chromosome in chromosomes}
     else:
         hardmask = hardmask.expanduser().resolve()
         if not hardmask.is_file():
@@ -210,7 +225,7 @@ def decode_command(
     callable_mask: Path,
     contract: dict[str, object],
 ) -> list[str]:
-    return [
+    command = [
         *_command_prefix(aou),
         "decode",
         "--executable",
@@ -249,6 +264,18 @@ def decode_command(
         "--backward-alignment",
         "fixed",
     ]
+    if contract["pair_selection"] == "random_haplotype_pairs":
+        command.extend(
+            [
+                "--n-random-pairs",
+                str(contract["n_random_pairs"]),
+                "--pairs-seed",
+                str(contract["pairs_seed"]),
+            ]
+        )
+        if bool(contract["exclude_within"]):
+            command.append("--exclude-within")
+    return command
 
 
 def _read_summary(path: Path, expected_positions: np.ndarray) -> tuple[np.ndarray, int]:
@@ -277,6 +304,30 @@ def _read_summary(path: Path, expected_positions: np.ndarray) -> tuple[np.ndarra
     ):
         raise ValueError(f"Gamma-SMC summary contains invalid posterior values: {path}")
     return profile.astype(np.float32), next(iter(pair_counts))
+
+
+def _pair_manifest_provenance(path: Path) -> dict[str, object] | None:
+    """Retain exact random-pair provenance without keeping every manifest copy."""
+    if not path.is_file():
+        return None
+    header: dict[str, str] = {}
+    schema = "unknown"
+    with path.open(encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.rstrip("\n")
+            if not line.startswith("#"):
+                break
+            fields = line[1:].strip().split("\t", maxsplit=1)
+            if len(fields) == 1:
+                if fields[0]:
+                    schema = fields[0]
+            elif fields[0] and fields[0] != "hap_i":
+                header[fields[0]] = fields[1]
+    return {
+        "schema": schema,
+        "sha256": sha256_file(path),
+        "header": header,
+    }
 
 
 def _valid_profile(
@@ -366,6 +417,8 @@ def decode_profile(
         raise RuntimeError(f"Gamma-SMC decode failed; see {failed}")
     try:
         values, n_pairs = _read_summary(temporary_summary, expected_positions)
+        run_path = temporary_summary.with_suffix(temporary_summary.suffix + ".run.json")
+        pair_manifest = temporary_summary.with_suffix(temporary_summary.suffix + ".pairs.tsv")
         metadata = {
             "schema": "simulatephase2.gamma-smc-profile/v1",
             "decode_key": key,
@@ -375,12 +428,11 @@ def decode_profile(
             "n_pairs": n_pairs,
             "decode_seconds": seconds,
             "command": command,
-            "gamma_run": json.loads(
-                temporary_summary.with_suffix(temporary_summary.suffix + ".run.json").read_text(
-                    encoding="utf-8"
-                )
-            ),
+            "gamma_run": json.loads(run_path.read_text(encoding="utf-8")),
         }
+        pair_provenance = _pair_manifest_provenance(pair_manifest)
+        if pair_provenance is not None:
+            metadata["pair_manifest"] = pair_provenance
         descriptor, temporary_name = tempfile.mkstemp(
             prefix=f".{profile_path.name}.", dir=profile_path.parent
         )
@@ -405,6 +457,29 @@ def decode_profile(
         temporary_summary.with_suffix(temporary_summary.suffix + ".run.json").unlink(
             missing_ok=True
         )
+        temporary_summary.with_suffix(temporary_summary.suffix + ".pairs.tsv").unlink(
+            missing_ok=True
+        )
+
+
+def expected_pair_count(contract: dict[str, object], diploid_samples: int) -> int:
+    """Return and validate the number of pairs implied by a decoder contract."""
+    pair_selection = str(contract.get("pair_selection", ""))
+    if pair_selection == "only_within":
+        return diploid_samples
+    if pair_selection != "random_haplotype_pairs":
+        raise ValueError(f"unsupported Gamma-SMC pair selection: {pair_selection}")
+    n_pairs = int(contract["n_random_pairs"])
+    n_haplotypes = 2 * diploid_samples
+    available = n_haplotypes * (n_haplotypes - 1) // 2
+    if bool(contract["exclude_within"]):
+        available -= diploid_samples
+    if n_pairs > available:
+        raise ValueError(
+            f"requested {n_pairs:,} random pairs but only {available:,} are available "
+            f"from {diploid_samples:,} diploids"
+        )
+    return n_pairs
 
 
 def _group_complete(
@@ -434,6 +509,7 @@ def _write_root(
     p_values: tuple[float, ...],
     n_sims: int,
 ) -> None:
+    pair_selection = str(decode_contract["pair_selection"])
     handle.attrs.update(
         {
             "schema": GAMMA_CUTOFF_SCHEMA,
@@ -446,7 +522,11 @@ def _write_root(
             "n_simulations": n_sims,
             "source_kind": "gamma_smc_posterior",
             "statistic": STATISTIC_COLUMN,
-            "pair_selection": "within_individual_homolog_pair",
+            "pair_selection": (
+                "within_individual_homolog_pair"
+                if pair_selection == "only_within"
+                else pair_selection
+            ),
             "tail": "upper",
             "monte_carlo_method": "(1 + count(null >= observed)) / (R + 1)",
             "significance_rule": "observed > cutoff",
@@ -491,6 +571,7 @@ def write_population_cutoffs(
     progress_every: int,
     keep_profiles: bool,
     fresh: bool,
+    profile_dir: Path | None = None,
 ) -> Path:
     simulation_contract, simulation_contract_key = load_population_contract(sim_dir, population)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -563,6 +644,7 @@ def write_population_cutoffs(
             length = int(unit_contract["sequence_length"])
             diploid_samples = int(unit_contract["diploid_samples"])
             contract = decode_contracts[chromosome]
+            n_pairs_expected = expected_pair_count(contract, diploid_samples)
             expected_positions = np.arange(
                 0, length, int(contract["output_at_stride"]), dtype=np.int64
             )
@@ -573,7 +655,11 @@ def write_population_cutoffs(
                     "callable_mask_sha256": sha256_file(callable_masks[chromosome]),
                 }
             )
-            profile_root = sim_dir / population.lower() / ".gamma_smc_profiles"
+            profile_root = (
+                profile_dir / population.lower()
+                if profile_dir is not None
+                else sim_dir / population.lower() / ".gamma_smc_profiles"
+            )
             profile_paths = [
                 profile_root / f"sim_{simulation:05d}" / f"{chromosome}.npz"
                 for simulation in range(n_sims)
@@ -635,10 +721,9 @@ def write_population_cutoffs(
                             f"elapsed={(time.monotonic() - started) / 60:.1f} min",
                             flush=True,
                         )
-            if not np.all(pair_counts == diploid_samples):
+            if not np.all(pair_counts == n_pairs_expected):
                 raise ValueError(
-                    "Gamma-SMC n_pairs does not equal simulated diploid samples "
-                    f"({diploid_samples})"
+                    f"Gamma-SMC n_pairs does not equal the decoder contract ({n_pairs_expected:,})"
                 )
             cutoffs, max_exceedances, ranks = monte_carlo_cutoffs(null, p_values)
             ends = np.minimum(expected_positions + int(contract["output_at_stride"]), length)
@@ -654,7 +739,7 @@ def write_population_cutoffs(
                         "chromosome": chromosome,
                         "input_tree_sequence_vcf_contig": "1",
                         "sequence_length": length,
-                        "n_pairs": diploid_samples,
+                        "n_pairs": n_pairs_expected,
                         "n_simulations": n_sims,
                         "source_manifest_sha256": source_digest,
                         "decoder_contract_json": json.dumps(contract, sort_keys=True),
@@ -729,10 +814,19 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--stride", type=int, default=DEFAULT_WINDOW_SIZE)
     result.add_argument("--cache-size", type=int, default=DEFAULT_CACHE_SIZE)
     result.add_argument("--pair-block", type=int, default=DEFAULT_PAIR_BLOCK)
+    result.add_argument("--n-random-pairs", type=int, default=0)
+    result.add_argument("--pairs-seed", type=int, default=DEFAULT_PAIRS_SEED)
+    result.add_argument("--exclude-within", action="store_true")
     result.add_argument("--decode-workers", type=int, default=4)
     result.add_argument("--decode-threads", type=int, default=1)
     result.add_argument("--progress-every", type=int, default=25)
     result.add_argument("--keep-profiles", action="store_true")
+    result.add_argument(
+        "--profile-dir",
+        type=Path,
+        default=None,
+        help="isolated restart-profile root; defaults to each population simulation directory",
+    )
     result.add_argument("--fresh", action="store_true")
     return result
 
@@ -756,6 +850,10 @@ def main(argv: list[str] | None = None) -> int:
     invalid = [name for name, value in positive.items() if value <= 0]
     if invalid:
         raise SystemExit(f"invalid nonpositive arguments: {invalid}")
+    if args.n_random_pairs < 0 or args.pairs_seed < 0:
+        raise SystemExit("random-pair count and seed must be nonnegative")
+    if args.exclude_within and args.n_random_pairs == 0:
+        raise SystemExit("--exclude-within requires --n-random-pairs")
     try:
         chromosomes = parse_chroms(args.chroms)
         p_values = parse_p_values(args.p_values)
@@ -829,6 +927,9 @@ def main(argv: list[str] | None = None) -> int:
                 cache_size=args.cache_size,
                 threads=args.decode_threads,
                 pair_block=args.pair_block,
+                n_random_pairs=args.n_random_pairs,
+                pairs_seed=args.pairs_seed,
+                exclude_within=args.exclude_within,
             )
             for chromosome in chromosomes
         }
@@ -836,8 +937,18 @@ def main(argv: list[str] | None = None) -> int:
             "[gamma-cutoffs] empirical decode contract "
             f"theta={args.theta:g} rho/theta={args.rho_over_theta:g} "
             f"mu={args.mutation_rate:g} threshold={args.threshold_years:g} years "
-            f"stride={args.stride:,} only_within=true statistic={STATISTIC_COLUMN}",
+            f"stride={args.stride:,} "
+            + (
+                f"random_pairs={args.n_random_pairs:,} pairs_seed={args.pairs_seed} "
+                f"exclude_within={str(args.exclude_within).lower()} "
+                if args.n_random_pairs > 0
+                else "only_within=true "
+            )
+            + f"statistic={STATISTIC_COLUMN}",
             flush=True,
+        )
+        profile_dir = (
+            args.profile_dir.expanduser().resolve() if args.profile_dir is not None else None
         )
         for population in populations:
             output = (
@@ -861,6 +972,7 @@ def main(argv: list[str] | None = None) -> int:
                 progress_every=args.progress_every,
                 keep_profiles=args.keep_profiles,
                 fresh=args.fresh,
+                profile_dir=profile_dir,
             )
     except Exception as error:
         raise SystemExit(f"Gamma-SMC cutoff generation failed: {error}") from error

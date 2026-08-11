@@ -6,6 +6,7 @@ from pathlib import Path
 
 import h5py
 import msprime
+import numpy as np
 import pytest
 import tszip
 
@@ -23,9 +24,7 @@ def test_gamma_callable_mask_is_complement_of_simulation_hardmask(tmp_path: Path
         hardmask=hardmask,
         expected_hardmask_sha256=run_sim.sha256_file(hardmask),
     )
-    assert result["chr1"].read_text(encoding="utf-8") == (
-        "1\t0\t100\n1\t200\t400\n1\t500\t600\n"
-    )
+    assert result["chr1"].read_text(encoding="utf-8") == ("1\t0\t100\n1\t200\t400\n1\t500\t600\n")
 
 
 def write_unit(root: Path, simulation: int) -> None:
@@ -72,13 +71,29 @@ def value(flag): return args[args.index(flag) + 1]
 output = pathlib.Path(value('--output'))
 source = pathlib.Path(value('--input'))
 simulation = int(source.parent.name.split('_')[1])
+n_pairs = int(value('--n-random-pairs')) if '--n-random-pairs' in args else 4
 output.parent.mkdir(parents=True, exist_ok=True)
 with output.open('w', encoding='utf-8') as handle:
     handle.write('position_0based\\tn_pairs\\tmean_p_tmrca_lt_threshold\\n')
     for index, position in enumerate((0, 10000, 20000)):
-        handle.write(f'{position}\\t4\\t{0.01 * simulation + 0.001 * index}\\n')
+        handle.write(f'{position}\\t{n_pairs}\\t{0.01 * simulation + 0.001 * index}\\n')
+if '--n-random-pairs' in args:
+    pair_manifest = pathlib.Path(str(output) + '.pairs.tsv')
+    pair_manifest.write_text(
+        '# gamma_smc_pair_manifest_v1\\n'
+        f'# n_pairs\\t{n_pairs}\\n'
+        f'# pairs_seed\\t{value("--pairs-seed")}\\n'
+        '# pairs_digest\\t0xtestdigest\\n'
+        '# hap_i\\thap_j\\n'
+        + ''.join(f'{index}\\t{index + 1}\\n' for index in range(n_pairs)),
+        encoding='utf-8',
+    )
 output.with_suffix(output.suffix + '.run.json').write_text(
-    json.dumps({'command': sys.argv, 'decode_seconds': 0.01}), encoding='utf-8')
+    json.dumps({
+        'command': sys.argv,
+        'decode_seconds': 0.01,
+        'n_pairs_recorded': n_pairs,
+    }), encoding='utf-8')
 counter = os.environ.get('FAKE_GAMMA_COUNTER')
 if counter:
     pathlib.Path(counter).mkdir(parents=True, exist_ok=True)
@@ -101,9 +116,7 @@ def test_gamma_smc_cutoffs_decode_tsz_and_restart_from_compact_hdf5(
         "populations": {"AFR": {"diploid_samples": 4, "demography_key": "toy"}},
     }
     sim_dir.mkdir()
-    (sim_dir / run_sim.SIM_ROOT_CONTRACT_NAME).write_text(
-        json.dumps(contract), encoding="utf-8"
-    )
+    (sim_dir / run_sim.SIM_ROOT_CONTRACT_NAME).write_text(json.dumps(contract), encoding="utf-8")
     for simulation in range(20):
         write_unit(sim_dir, simulation)
     repository = tmp_path / "gamma_smc_ts"
@@ -169,3 +182,91 @@ def test_gamma_smc_cutoffs_decode_tsz_and_restart_from_compact_hdf5(
     binary.write_bytes(b"changed gamma binary")
     with pytest.raises(SystemExit, match="incompatible cutoff output"):
         generate_cutoff_gamma_smc.main(args)
+
+
+def test_random_pair_cutoffs_are_seeded_counted_and_isolated(tmp_path: Path, monkeypatch) -> None:
+    sim_dir = tmp_path / "sims"
+    no_mask_sha = hashlib.sha256(b"NO_MASK").hexdigest()
+    contract = {
+        "schema": run_sim.SIM_ROOT_CONTRACT_SCHEMA,
+        "global": {"base_seed": 42, "mask_sha256": no_mask_sha},
+        "populations": {"AFR": {"diploid_samples": 4, "demography_key": "toy"}},
+    }
+    sim_dir.mkdir()
+    (sim_dir / run_sim.SIM_ROOT_CONTRACT_NAME).write_text(json.dumps(contract), encoding="utf-8")
+    for simulation in range(10):
+        write_unit(sim_dir, simulation)
+    repository = tmp_path / "gamma_smc_ts"
+    aou, binary = fake_gamma(repository)
+    counter = tmp_path / "decode_counter"
+    monkeypatch.setenv("FAKE_GAMMA_COUNTER", str(counter))
+    output_dir = tmp_path / "sanity" / "cutoffs"
+    profile_dir = tmp_path / "sanity" / "profiles"
+    args = [
+        "--sim-dir",
+        str(sim_dir),
+        "--output-dir",
+        str(output_dir),
+        "--profile-dir",
+        str(profile_dir),
+        "--keep-profiles",
+        "--pops",
+        "AFR",
+        "--chroms",
+        "1",
+        "--n-sims",
+        "10",
+        "--p-values",
+        "0.1",
+        "--n-random-pairs",
+        "6",
+        "--pairs-seed",
+        "42",
+        "--gamma-smc-repo",
+        str(repository),
+        "--gamma-smc-aou",
+        str(aou),
+        "--gamma-smc-executable",
+        str(binary),
+        "--decode-workers",
+        "2",
+    ]
+    assert generate_cutoff_gamma_smc.main(args) == 0
+    assert len(list(counter.glob("*.done"))) == 10
+
+    output = output_dir / "afr.gamma_smc_cutoffs.10kb.h5"
+    with h5py.File(output, "r") as handle:
+        assert handle.attrs["pair_selection"] == "random_haplotype_pairs"
+        decoder = json.loads(handle.attrs["decoder_contract_json"])
+        assert decoder["n_random_pairs"] == 6
+        assert decoder["pairs_seed"] == 42
+        assert decoder["exclude_within"] is False
+        group = handle["chr1"]
+        assert group.attrs["n_pairs"] == 6
+        assert group["max_null_exceedances"][:].tolist() == [0]
+        assert group["rank_from_largest"][:].tolist() == [1]
+        np.testing.assert_array_equal(group["cutoff"][:], group["null_max"][:][None, :])
+
+    profiles = sorted(profile_dir.rglob("*.npz"))
+    assert len(profiles) == 10
+    with np.load(profiles[0], allow_pickle=False) as profile:
+        metadata = json.loads(str(profile["metadata_json"].item()))
+    assert metadata["n_pairs"] == 6
+    assert metadata["pair_manifest"]["schema"] == "gamma_smc_pair_manifest_v1"
+    assert metadata["pair_manifest"]["header"]["pairs_seed"] == "42"
+    assert "--n-random-pairs" in metadata["command"]
+    assert not list(profile_dir.rglob("*.pairs.tsv"))
+
+    assert generate_cutoff_gamma_smc.main(args) == 0
+    assert len(list(counter.glob("*.done"))) == 10
+
+
+def test_random_pair_count_rejects_an_impossible_panel() -> None:
+    contract = {
+        "pair_selection": "random_haplotype_pairs",
+        "n_random_pairs": 7,
+        "pairs_seed": 42,
+        "exclude_within": True,
+    }
+    with pytest.raises(ValueError, match="only 4 are available"):
+        generate_cutoff_gamma_smc.expected_pair_count(contract, diploid_samples=2)

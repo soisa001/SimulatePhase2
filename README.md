@@ -393,6 +393,51 @@ This is substantially more expensive than the tree-truth compact reducer:
 invocations. The overall runner therefore defaults to `compact`; use
 `--cutoff-mode gamma-smc` or `both` intentionally.
 
+### Run the isolated 10-simulation, 100,000-pair sanity calibration
+
+`run_gamma_smc_sanity.py` applies the large-panel empirical pair contract to
+the first 10 completed simulations (indices 0--9) for every requested
+population and chromosome. It samples 100,000 distinct unordered haplotype
+pairs with the fixed empirical seed 1729, includes within-individual pairs just
+like the default Workbench scan, and otherwise uses the same Gamma-SMC rates,
+mask complement, 4,500-year threshold, 25-year generation time, and 10 kb grid
+as the full reducer.
+
+The workflow preflights all 1,320 selected TSZip units before decoding. It only
+reads published simulation files and places HDF5 cutoffs and restart profiles
+under a separate sanity root, so it can run while `run_sim.py` atomically
+publishes later simulation indices. A representative 100-CPU-node allocation,
+with the main producer using 45 workers, is:
+
+```bash
+uv run --frozen python -u run_gamma_smc_sanity.py \
+  --sim-dir /scratch.global/soisa001/sims_v2 \
+  --output-dir /scratch.global/soisa001/sims_v2/sanity/gamma_smc_10sims_100000pairs \
+  --gamma-smc-repo ../gamma_smc_ts \
+  --pops AFR,EUR,AMR,SAS,MID,EAS --chroms 1-22 \
+  --n-sims 10 --n-random-pairs 100000 --pairs-seed 1729 \
+  --decode-workers 1 --decode-threads 24
+```
+
+The single decoder uses up to 24 CPUs while avoiding several concurrent
+TSZip-to-VCF streams on the same filesystem as the active simulation producer.
+Adjust the two concurrency arguments together with the producer worker count so
+their product plus the producer count does not exceed the allocated CPUs. Do
+not add `--exclude-within` unless the empirical 100,000-pair scan used the same
+exclusion.
+
+With 10 null simulations, the minimum plus-one p-value is `1/11 = 0.090909...`.
+Thus, for p <= 0.1, the position-specific cutoff is the largest of the 10 null
+Gamma-SMC values, and the tie-safe significance rule is strictly
+`observed > cutoff`. The workflow writes:
+
+- `p_le_0.1_cutoffs.tsv.gz`: every exact population/chromosome/10 kb cutoff;
+- `p_le_0.1_cutoff_summary.tsv`: descriptive ranges and quantiles only, not a
+  pooled inferential cutoff;
+- `cutoffs/*.gamma_smc_cutoffs.10kb.h5`: restartable source artifacts;
+- `manifest.json` and `checksums.sha256`: selected unit digests, all resolved
+  decoder parameters, commands, paths, and output checksums.
+
 ## Run all phases
 
 `run_full_simulation.py` writes a separate timestamped provenance log per phase
